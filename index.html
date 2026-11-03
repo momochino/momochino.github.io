@@ -140,8 +140,8 @@
   .gaze-menu-btn{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(8,11,17,.42);border:1px solid rgba(255,255,255,.32);color:rgba(255,255,255,.78);border-radius:16px;padding:5px 11px;font-size:11.5px;font-weight:600;white-space:nowrap;letter-spacing:.04em;opacity:.72;transition:none;animation:none}
   .gaze-menu-btn.gazed{border-color:var(--accent)}
   /* Menu board: SPATIALLY FIXED, one rigid board. While open, the
-     board hangs in space where it was opened (25 deg above the view
-     direction at that instant). Per eye there is exactly ONE wrapper
+     board hangs in space where it was opened (level in front: the
+     view's yaw at that instant, pitch fixed at 0). Per eye there is exactly ONE wrapper
      element; per frame only the wrapper is translated to the board
      centre's projected screen position. The background and items are
      children at fixed positions inside the wrapper and are never
@@ -279,13 +279,13 @@
       <div id="log" role="log" aria-live="polite"></div>
     </section>
   </div>
-  <div class="app-version" id="appVersion" aria-hidden="true">v1.0</div>
+  <div class="app-version" id="appVersion" aria-hidden="true">v1.1</div>
 </div>
 
 <script>
 (function(){
   "use strict";
-  var APP_VERSION='v1.0';
+  var APP_VERSION='v1.1';
   var logEl = document.getElementById('log');
   var urlInput = document.getElementById('urlInput');
   var video = document.getElementById('video');
@@ -1201,9 +1201,9 @@
      pasted over the video: it only appears in the lower part of the
      view while the current view is pitched down past about -40
      degrees (GAZE_SHOW_PITCH). Dwelling on the appeared target (0.8s)
-     opens the menu as ONE rigid board, SPATIALLY FIXED at the view
-     direction of that instant lifted 25 degrees (GAZE_OPEN_LIFT): the
-     board's centre direction and basis are captured once and never
+     opens the menu as ONE rigid board, SPATIALLY FIXED at the facing
+     direction of that instant with its pitch fixed level (0 degrees):
+     the board's centre direction and basis are captured once and never
      change while it is open, and every item sits at a fixed tangent
      offset inside the board. The reticle is the plain centre reticle:
      the user turns their head so it lands on an item, and dwelling
@@ -1211,12 +1211,12 @@
      unit — one wrapper element per eye on the phone (only the wrapper
      is translated to the board centre's projected position), one
      textured quad in WebXR — so items can never drift apart, swim or
-     double up. Executing an item closes the menu; 5s without the gaze
-     on any item closes it too.
+     double up. The menu never closes on its own: it stays open until
+     an item is executed or the close button is picked.
      The same state machine runs for the phone SBS mode (DOM overlay,
      gaze = screen centre, gyro or drag alike) and for WebXR (GL overlay
      projected per view, gaze = camera forward). */
-  var GAZE_MENU_DWELL=800, GAZE_ITEM_DWELL=1200, GAZE_AUTOCLOSE=5000;
+  var GAZE_MENU_DWELL=800, GAZE_ITEM_DWELL=1200;
   var GAZE_MENU_ANGLE=0.19, GAZE_ITEM_ANGLE=0.165;
   // View pitch (radians) below which the menu target becomes visible:
   // about -40 degrees. At or above this pitch the target is fully
@@ -1242,15 +1242,16 @@
   // frustum, px per tangent unit = eye height / 2).
   var GAZE_PANEL_HW=0.62, GAZE_PANEL_HH=0.44;
   var GAZE_LAYOUT_U=300, GAZE_PANEL_W=372, GAZE_PANEL_H=264;
-  // The board opens this far above the view direction at the instant
-  // the menu opens: the menu is called while looking steeply down at
-  // the menu target, and the board waits where the user naturally
-  // raises their head to — not down at the calling posture.
-  var GAZE_OPEN_LIFT=25*Math.PI/180;
+  // The board opens level in front of the user: its yaw is the view's
+  // yaw at the instant the menu opens and its pitch is fixed at 0
+  // degrees (horizontal). The menu is called while looking steeply
+  // down at the menu target; after calling it, the user raises their
+  // head and the board is straight ahead — no need to keep holding
+  // the head down to operate it.
   var gazeBasisMat=null;
   var gaze={ state:'idle', idleDir:null, menuOpen:false,
              panelDir:null, panelR:null, panelU:null, blockedId:null,
-             dwellId:null, dwellStart:0, progress:0, lastItemGaze:0,
+             dwellId:null, dwellStart:0, progress:0,
              farSince:0, cooldownUntil:0, basis:null, reticleShow:false,
              targetVisible:false };
   var GAZE_ITEMS=[
@@ -1316,26 +1317,24 @@
     return false;
   }
   function gazeOpenMenu(b, now){
-    // Spatially fixed board: the board's centre direction is the view
-    // direction at this exact instant, lifted by GAZE_OPEN_LIFT (25
-    // deg) — the menu is called from a steep downward gaze, and the
-    // board waits where the user raises their head to. The board
-    // basis is the horizon-locked basis of that direction (via
-    // matFromForward, the same construction as the video), captured
-    // once here and never changed while the board is open: the board
-    // is a single rigid unit in space and items keep their fixed
-    // offsets inside it. No animation on display either.
+    // Spatially fixed board: the board's centre direction keeps the
+    // yaw of the view at this exact instant, with the pitch fixed at
+    // 0 degrees (level, straight ahead) — the menu is called from a
+    // steep downward gaze, and the board waits level in front, where
+    // the user raises their head to. The board basis is the
+    // horizon-locked basis of that direction (via matFromForward, the
+    // same construction as the video), captured once here and never
+    // changed while the board is open: the board is a single rigid
+    // unit in space and items keep their fixed offsets inside it. No
+    // animation on display either.
     var f=b.f;
     var yawA=Math.atan2(-f[0], -f[2]);
-    var pitchA=Math.asin(Math.max(-1, Math.min(1, f[1])))+GAZE_OPEN_LIFT;
-    var cp=Math.cos(pitchA);
-    var dir=[-Math.sin(yawA)*cp, Math.sin(pitchA), -Math.cos(yawA)*cp];
+    var dir=[-Math.sin(yawA), 0, -Math.cos(yawA)];
     var m=matFromForward(dir);
     gaze.panelDir=dir;
     gaze.panelR=[m[0], m[1], m[2]];
     gaze.panelU=[m[3], m[4], m[5]];
     gaze.state='menu'; gaze.menuOpen=true;
-    gaze.lastItemGaze=now;
     gaze.dwellId=null; gaze.progress=0;
     // The item already under the gaze at the opening instant must not
     // start dwelling until the gaze has left it once: at open, the
@@ -1432,8 +1431,8 @@
         if(best!==gaze.blockedId) gaze.blockedId=null;
         else best=null;
       }
-      if(best) gaze.lastItemGaze=now;
-      else if(now-gaze.lastItemGaze>GAZE_AUTOCLOSE){ gazeCloseMenu(now); return; }
+      // No auto-close: the board stays open until an item is
+      // executed or the close button is picked.
       if(gazeDwellTick(best, GAZE_ITEM_DWELL, now)){
         var id=best;
         gazeActivate(id);
