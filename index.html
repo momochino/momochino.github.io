@@ -133,19 +133,24 @@
   .gaze-reticle .ring-fg{fill:none;stroke:var(--accent);stroke-width:2.4;stroke-linecap:round}
   .gaze-reticle .dot{fill:rgba(255,255,255,.8)}
   /* Menu target: small and translucent so it never feels pasted over
-     the video; it sits low in the view (anchor angle in gazeAnchorIdle).
+     the video; it sits low in the view (anchor angle in gazeAnchorIdle),
+     right at the bottom edge of the video, just above the black area.
      It is NOT shown by default — it only appears while the view is
-     pitched down past about -20 degrees (see GAZE_SHOW_PITCH). */
+     pitched down past about -40 degrees (see GAZE_SHOW_PITCH). */
   .gaze-menu-btn{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(8,11,17,.42);border:1px solid rgba(255,255,255,.32);color:rgba(255,255,255,.78);border-radius:16px;padding:5px 11px;font-size:11.5px;font-weight:600;white-space:nowrap;letter-spacing:.04em;opacity:.72;transition:none;animation:none}
-  .gaze-menu-btn.gazed{border-color:var(--accent);color:var(--accent);opacity:1}
+  .gaze-menu-btn.gazed{border-color:var(--accent)}
   /* Menu panel: no transitions or animations at all. The panel is
      anchored in the video space at the instant it opens and must appear
-     exactly there, instantly — any easing/lag reads as swimmy motion. */
+     exactly there, instantly — any easing/lag reads as swimmy motion.
+     Gaze feedback on any target is the border colour only, plus the
+     reticle's circular progress: no item ever scales, moves, floats or
+     otherwise transforms when looked at (see also .gaze-item.gazed). */
   .gaze-panel-bg{position:absolute;left:50%;top:50%;width:308px;height:252px;transform:translate(-50%,-50%);background:rgba(4,6,10,.72);border:1px solid rgba(255,255,255,.28);border-radius:16px;transition:none;animation:none}
   .gaze-item{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:124px;min-height:66px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;background:rgba(10,14,22,.92);border:1.5px solid rgba(255,255,255,.4);border-radius:12px;color:#fff;text-align:center;padding:6px 4px;transition:none;animation:none}
   .gaze-item .gi-icon{font-size:19px;line-height:1.15}
   .gaze-item .gi-label{font-size:13.5px;font-weight:700;line-height:1.25;white-space:nowrap}
-  .gaze-item.gazed{border-color:var(--accent);background:rgba(42,33,16,.95)}
+  .gaze-item.gazed{border-color:var(--accent)}
+  .gaze-item.gaze-close .gi-icon{font-size:30px;line-height:1}
 
   @media (orientation:landscape) and (max-height:480px){
     .start-head h1{font-size:22px}
@@ -1180,7 +1185,7 @@
      of each eye, and looking at a target for a fixed dwell time presses
      it. The idle "メニュー" target is hidden by default so nothing is
      pasted over the video: it only appears in the lower part of the
-     view while the current view is pitched down past about -20
+     view while the current view is pitched down past about -40
      degrees (GAZE_SHOW_PITCH). Dwelling on the appeared target (0.8s)
      opens the menu panel anchored at the current gaze centre in the
      video space, so the panel stays put in the world while the user
@@ -1193,14 +1198,15 @@
   var GAZE_MENU_DWELL=800, GAZE_ITEM_DWELL=1200, GAZE_AUTOCLOSE=5000;
   var GAZE_MENU_ANGLE=0.19, GAZE_ITEM_ANGLE=0.165;
   // View pitch (radians) below which the menu target becomes visible:
-  // about -20 degrees. At or above this pitch the target is fully
+  // about -40 degrees. At or above this pitch the target is fully
   // hidden and no dwell can start.
-  var GAZE_SHOW_PITCH=-0.3491;
+  var GAZE_SHOW_PITCH=-0.6981;
   // Pitch (degrees) at which the menu target sits: fixed below the
-  // horizon in the current facing direction, so once the user looks
-  // down past -20 degrees it is already in the lower part of the view,
-  // and looking a little further down centres it for the dwell.
-  var GAZE_MENU_PITCH_DEG=-36;
+  // horizon in the current facing direction, right at the bottom edge
+  // of the video, just above the black area below it, so once the user
+  // looks down past -40 degrees it is already in the lower part of the
+  // view, and looking a little further down centres it for the dwell.
+  var GAZE_MENU_PITCH_DEG=-55;
   // The reticle is hidden by default. It appears only when the gaze
   // comes within this angle of the menu target (looking toward it), or
   // while the menu panel is open.
@@ -1215,7 +1221,14 @@
     {id:'back',     icon:'⏪', label:'10秒戻る',   tx:-0.46, ty: 0   },
     {id:'fwd',      icon:'⏩', label:'10秒進む',   tx: 0.46, ty: 0   },
     {id:'recenter', icon:'◎', label:'正面に戻す', tx: 0,    ty: 0.34},
-    {id:'exit',     icon:'✕', label:'VRを終了',   tx: 0,    ty:-0.34}
+    {id:'exit',     icon:'✕', label:'VRを終了',   tx: 0,    ty:-0.34},
+    // Close: a plain "✕"-only button (no text label) in the panel's
+    // top-right corner — the usual close-button spot. It fills the
+    // corner that was empty in the cross layout (top = recenter row,
+    // right = fwd column), so the cross itself is unchanged, and it
+    // keeps the full item size so it stays easy to dwell on. Picking
+    // it just closes the panel and does nothing else.
+    {id:'close',    icon:'✕', label:'',           tx: 0.46, ty: 0.34}
   ];
   function gazeReset(){
     gaze.state='idle'; gaze.idleDir=null; gaze.menuDir=null;
@@ -1237,15 +1250,15 @@
     return Math.acos(c);
   }
   function gazeAnchorIdle(b){
-    // The target sits at a fixed pitch of GAZE_MENU_PITCH_DEG (-36 deg)
+    // The target sits at a fixed pitch of GAZE_MENU_PITCH_DEG (-55 deg)
     // in the direction the user currently faces (same yaw as the view
     // forward, pitch taken from the horizon, not from the view itself).
     // Recomputed every frame from the forward's yaw only, so pitching
     // the view down moves the gaze toward the target without the target
     // itself moving, and yawing keeps the target directly below.
     var yawA=Math.atan2(-b.f[0], -b.f[2]);
-    var cp=Math.cos(GAZE_MENU_PITCH_DEG*Math.PI/180); // 0.8090
-    var sp=Math.sin(GAZE_MENU_PITCH_DEG*Math.PI/180); // -0.5878
+    var cp=Math.cos(GAZE_MENU_PITCH_DEG*Math.PI/180); // 0.5736
+    var sp=Math.sin(GAZE_MENU_PITCH_DEG*Math.PI/180); // -0.8192
     gaze.idleDir=[-Math.sin(yawA)*cp, sp, -Math.cos(yawA)*cp];
   }
   function gazeViewPitch(b){
@@ -1301,6 +1314,10 @@
     } else if(id==='recenter'){
       log('視線操作: 正面に戻す', 'ok');
       if(xrSession) xrRecenter(); else recenter();
+    } else if(id==='close'){
+      // Close only: no action is performed; the caller closes the
+      // panel right after activation (as for every non-exit item).
+      log('視線操作: 閉じる（パネルを閉じるだけです）', 'ok');
     } else if(id==='exit'){
       log('視線操作: VRを終了', 'ok');
       if(xrSession){ try{ xrSession.end(); }catch(e){ log('視線操作: セッション終了 失敗 '+(e.message||e), 'ng'); } }
@@ -1316,7 +1333,7 @@
     if(gaze.state==='idle'){
       // The menu target is completely hidden while the view faces
       // forward or up. It only appears once the view pitch drops
-      // below about -20 degrees, in the lower part of the view.
+      // below about -40 degrees, in the lower part of the view.
       gaze.targetVisible = gazeViewPitch(b) < GAZE_SHOW_PITCH;
       gazeAnchorIdle(b);
       if(!gaze.targetVisible){
@@ -1374,8 +1391,11 @@
         var el=document.createElement('div');
         el.className='gaze-item'; el.hidden=true;
         var ic=document.createElement('span'); ic.className='gi-icon'; ic.textContent=it.icon;
+        el.appendChild(ic);
         var lb=document.createElement('span'); lb.className='gi-label'; lb.textContent=it.label;
-        el.appendChild(ic); el.appendChild(lb);
+        // The close item is a plain "✕"-only button: no text label.
+        if(it.id==='close'){ el.classList.add('gaze-close'); el.setAttribute('aria-label','閉じる'); }
+        else el.appendChild(lb);
         eye.appendChild(el);
         items[it.id]={el:el, icon:ic, label:lb};
       });
@@ -1539,7 +1559,8 @@
         back: gazeMakeTex('⏪ 10秒戻る', 512, 224, 56),
         fwd: gazeMakeTex('⏩ 10秒進む', 512, 224, 56),
         recenter: gazeMakeTex('◎ 正面に戻す', 512, 224, 52),
-        exit: gazeMakeTex('✕ 終了', 512, 224, 62)
+        exit: gazeMakeTex('✕ 終了', 512, 224, 62),
+        close: gazeMakeTex('✕', 512, 224, 84)
       };
       gazeGlState=1;
       log('視線操作: WebXR用オーバーレイを準備しました', 'ok');
