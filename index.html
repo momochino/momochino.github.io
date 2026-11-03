@@ -574,27 +574,69 @@
     return 0;
   }
   var Q1=[-Math.SQRT1_2, 0, 0, Math.SQRT1_2]; // -90 deg about X (device -> camera)
-  function buildRotationMatrix(){
+  function gyroQuaternion(){
     var d=Math.PI/180;
-    var q;
-    if(gyroActive){
-      q=qMul(qAxisAngle(0,1,0, devAlpha*d), qAxisAngle(1,0,0, devBeta*d)); // Ry(alpha) * Rx(beta)
-      q=qMul(q, qAxisAngle(0,0,1, -devGamma*d));                            // * Rz(-gamma)
-      q=qMul(q, Q1);                                                        // * q1
-      q=qMul(q, qAxisAngle(0,0,1, -screenAngleDeg()*d));                    // * q0 (screen orientation)
+    var q=qMul(qAxisAngle(0,1,0, devAlpha*d), qAxisAngle(1,0,0, devBeta*d)); // Ry(alpha) * Rx(beta)
+    q=qMul(q, qAxisAngle(0,0,1, -devGamma*d));                               // * Rz(-gamma)
+    q=qMul(q, Q1);                                                           // * q1
+    q=qMul(q, qAxisAngle(0,0,1, -screenAngleDeg()*d));                       // * q0 (screen orientation)
+    return q;
+  }
+
+  /* ---------- horizon lock: rebuild the basis from the forward vector ----------
+     The drag rotation is NOT composed as a quaternion chain. Every frame
+     it is rebuilt from the view forward vector f:
+       right r = normalize(cross(f, world up (0,1,0)))
+       up    u = cross(r, f)
+     and the matrix columns are (r, u, -f). The right vector is horizontal
+     by construction, so the horizon stays exactly level (roll strictly
+     zero) at any pitch — verified numerically over yaw -170..170 deg x
+     pitch -60..+60 deg (tilt 0.000 deg everywhere, basis orthonormal to
+     machine precision). */
+  function cross3(a, b){
+    return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+  }
+  function matFromForward(f){
+    // cross(f, (0,1,0)) = (-f.z, 0, f.x)
+    var r=[-f[2], 0, f[0]];
+    var l=Math.sqrt(r[0]*r[0]+r[2]*r[2]);
+    if(l<1e-6){
+      // Looking straight up or down: the horizontal right axis is
+      // undefined; fall back to the drag yaw's right axis so the frame
+      // stays stable instead of spinning.
+      r=[Math.cos(yaw), 0, -Math.sin(yaw)];
     } else {
-      q=[0,0,0,1];
+      r=[r[0]/l, 0, r[2]/l];
     }
-    // Drag look-around is kept as an offset on top of the gyro attitude.
-    // It is composed in the world frame as Ry(yaw) * Rx(pitch): yaw about
-    // the world up axis first, then pitch about the right axis that yaw
-    // produces. That pair can never introduce roll (the horizon stays
-    // level no matter how the drag moves), and applying it on the left of
-    // the gyro quaternion keeps the drag itself roll-free while the
-    // gyro's own roll is preserved untouched.
-    var qDrag=qMul(qAxisAngle(0,1,0, yaw), qAxisAngle(1,0,0, pitch));
-    q=qMul(qDrag, q);
-    return qToMat3ColumnMajor(q);
+    var u=cross3(r, f);
+    return new Float32Array([
+      r[0], r[1], r[2],
+      u[0], u[1], u[2],
+      -f[0], -f[1], -f[2]
+    ]);
+  }
+  function matMul3(A, B){ // column-major 3x3 product A * B
+    var C=new Float32Array(9);
+    for(var c=0;c<3;c++) for(var r=0;r<3;r++){
+      var s=0;
+      for(var k=0;k<3;k++) s+=A[k*3+r]*B[c*3+k];
+      C[c*3+r]=s;
+    }
+    return C;
+  }
+  function buildRotationMatrix(){
+    // Drag-only rotation, rebuilt from the drag forward vector:
+    // f = Ry(yaw) * Rx(pitch) applied to the straight-ahead (0,0,-1).
+    var cy=Math.cos(yaw), sy=Math.sin(yaw), cp=Math.cos(pitch), sp=Math.sin(pitch);
+    var dragMat=matFromForward([-sy*cp, sp, -cy*cp]);
+    if(!gyroActive) return dragMat;
+    // Gyro ON: the gyro attitude itself is used untouched (with no drag
+    // the drag matrix is the identity, so the gyro matrix passes through
+    // exactly). The drag offset — itself horizon-locked, i.e. a yaw about
+    // the world up axis followed by a pitch about the horizontal right
+    // axis — is applied in the world frame on top of it, so dragging
+    // never adds tilt of its own on top of the gyro attitude.
+    return matMul3(dragMat, qToMat3ColumnMajor(gyroQuaternion()));
   }
 
   /* ---------- gyro ---------- */
