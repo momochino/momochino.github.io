@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000000">
 <link rel="icon" href="data:,">
 <title>VR180 Viewer</title>
 <style>
@@ -58,6 +62,13 @@
   .loadstatus.ng{color:#ff9d9d}
   .loadstatus.busy{color:var(--accent)}
   body.ui-off .loadstatus{display:none}
+
+  /* ---------- add-to-home-screen hint (browser mode only, dismissible) ---------- */
+  .sa-hint{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(72px + env(safe-area-inset-bottom));z-index:8;display:none;align-items:center;gap:8px;background:rgba(10,13,19,.88);border:1px solid var(--line);color:var(--text);font-size:12px;line-height:1.45;padding:7px 8px 7px 13px;border-radius:20px;max-width:calc(100vw - 24px);box-shadow:0 4px 14px rgba(0,0,0,.45)}
+  .sa-hint.show{display:flex}
+  .sa-hint button{appearance:none;border:1px solid var(--line);background:var(--btn);color:var(--muted);border-radius:50%;width:22px;height:22px;line-height:1;font-size:14px;padding:0;flex:0 0 auto}
+  body.ui-off .sa-hint{display:none}
+  body.fs-on .sa-hint{display:none}
 
   /* ---------- status overlaid on the canvas, bottom-left ---------- */
   .statusbar{position:fixed;left:calc(8px + env(safe-area-inset-left));bottom:calc(8px + env(safe-area-inset-bottom));z-index:5;font-family:var(--mono);font-size:10.5px;color:rgba(232,236,243,.8);background:rgba(0,0,0,.45);padding:3px 8px;border-radius:6px;display:flex;flex-wrap:nowrap;gap:3px 12px;pointer-events:none;max-width:calc(100vw - 130px);overflow:hidden;white-space:nowrap}
@@ -126,6 +137,11 @@
 </div>
 
 <div class="loadstatus" id="loadStatus" role="status">動画： 未読み込み（URLを貼って「読込」を押してください）</div>
+
+<div class="sa-hint" id="saHint" role="note">
+  <span>全画面で見るには：共有ボタン →「ホーム画面に追加」</span>
+  <button id="saHintClose" type="button" aria-label="案内を閉じる">×</button>
+</div>
 
 <div class="statusbar" aria-live="polite">
   <span>yaw <b id="stYaw">0°</b></span>
@@ -499,8 +515,10 @@
     if(!dragging) return;
     var dx=e.clientX-lastX, dy=e.clientY-lastY;
     lastX=e.clientX; lastY=e.clientY;
-    yaw   -= dx*0.005;
-    pitch -= dy*0.005;
+    // Inverted mapping (both axes): dragging right now looks toward the
+    // opposite side from before, and likewise for up/down.
+    yaw   += dx*0.005;
+    pitch += dy*0.005;
     // wrap yaw to -PI..PI, clamp pitch
     while(yaw>Math.PI) yaw-=Math.PI*2;
     while(yaw<-Math.PI) yaw+=Math.PI*2;
@@ -567,8 +585,13 @@
     } else {
       q=[0,0,0,1];
     }
-    // Drag look-around is kept as an offset on top of the gyro attitude
-    // (with no gyro it is the whole rotation, exactly as before: Ry(yaw)*Rx(pitch)).
+    // Drag look-around is kept as an offset on top of the gyro attitude.
+    // It is composed in the world frame as Ry(yaw) * Rx(pitch): yaw about
+    // the world up axis first, then pitch about the right axis that yaw
+    // produces. That pair can never introduce roll (the horizon stays
+    // level no matter how the drag moves), and applying it on the left of
+    // the gyro quaternion keeps the drag itself roll-free while the
+    // gyro's own roll is preserved untouched.
     var qDrag=qMul(qAxisAngle(0,1,0, yaw), qAxisAngle(1,0,0, pitch));
     q=qMul(qDrag, q);
     return qToMat3ColumnMajor(q);
@@ -737,6 +760,25 @@
   }
   requestAnimationFrame(frame);
   updateStatus();
+
+  /* ---------- standalone (added to Home Screen) detection ----------
+     On iPhone the element Fullscreen API is unavailable in Safari, so the
+     intended fullscreen route is launching standalone from the Home
+     Screen. Show the small how-to hint only while running in a browser
+     tab; never when already standalone, and let the user dismiss it. */
+  var saHint=document.getElementById('saHint');
+  var isStandalone=(window.navigator.standalone===true) ||
+    (typeof window.matchMedia==='function' && window.matchMedia('(display-mode: standalone)').matches);
+  if(isStandalone){
+    log('standalone表示で起動しています（ホーム画面から起動）', 'ok');
+  } else {
+    saHint.classList.add('show');
+    log('ブラウザ表示です。全画面で見るには 共有ボタン →「ホーム画面に追加」から起動してください');
+  }
+  document.getElementById('saHintClose').addEventListener('click', function(){
+    saHint.classList.remove('show');
+    log('「ホーム画面に追加」の案内を閉じました');
+  });
 
   /* ---------- initial URL from ?u= ---------- */
   var params=new URLSearchParams(location.search);
