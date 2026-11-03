@@ -133,7 +133,9 @@
   .gaze-reticle .ring-fg{fill:none;stroke:var(--accent);stroke-width:2.4;stroke-linecap:round}
   .gaze-reticle .dot{fill:rgba(255,255,255,.8)}
   /* Menu target: small and translucent so it never feels pasted over
-     the video; it sits low in the view (anchor angle in gazeAnchorIdle). */
+     the video; it sits low in the view (anchor angle in gazeAnchorIdle).
+     It is NOT shown by default — it only appears while the view is
+     pitched down past about -20 degrees (see GAZE_SHOW_PITCH). */
   .gaze-menu-btn{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(8,11,17,.42);border:1px solid rgba(255,255,255,.32);color:rgba(255,255,255,.78);border-radius:16px;padding:5px 11px;font-size:11.5px;font-weight:600;white-space:nowrap;letter-spacing:.04em;opacity:.72;transition:none;animation:none}
   .gaze-menu-btn.gazed{border-color:var(--accent);color:var(--accent);opacity:1}
   /* Menu panel: no transitions or animations at all. The panel is
@@ -194,6 +196,7 @@
       <span class="time" id="timeText">0:00 / 0:00</span>
     </div>
     <button class="vr-big" id="vrBtn" type="button">VRで見る<small id="vrBtnSub">ゴーグルで見る場合はこちら</small></button>
+    <p class="note">VR中は、下を向くとメニューが出ます</p>
 
     <section class="works" id="worksSection" hidden aria-label="作品リスト">
       <h2>作品リスト</h2>
@@ -235,7 +238,7 @@
       <div class="set-row">
         <div>
           <div class="set-label">視線操作</div>
-          <div class="set-note">VR中、手を使わずに見続けるだけで操作できます。下の「メニュー」を見ると開きます</div>
+          <div class="set-note">VR中、手を使わずに見続けるだけで操作できます。下を向くと「メニュー」が出ます</div>
         </div>
         <button class="switch" id="gazeSetBtn" type="button" aria-pressed="true">ON</button>
       </div>
@@ -645,6 +648,7 @@
     if(!video.paused) requestWakeLock();
     if(video.paused) tryPlay('VR開始時');
     log('VRモード: 開始（SBS表示）', 'ok');
+    log('VRモード: 開始時ジャイロ = '+(gyroActive?'ON（ジャイロ経路・地平線ロック）':'OFF（ドラッグ経路・地平線ロック）')+' / 設定='+(settings.gyro?'ON':'OFF')+' / 受信中='+(gyroActive?'はい':'いいえ'), gyroActive?'ok':'ev');
     setTimeout(resize, 60);
   }
   function exitVr(){
@@ -979,17 +983,42 @@
     return C;
   }
   function buildRotationMatrix(){
-    // Drag-only rotation, rebuilt from the drag forward vector:
+    // Drag rotation, rebuilt from the drag forward vector:
     // f = Ry(yaw) * Rx(pitch) applied to the straight-ahead (0,0,-1).
     var cy=Math.cos(yaw), sy=Math.sin(yaw), cp=Math.cos(pitch), sp=Math.sin(pitch);
     var m=matFromForward([-sy*cp, sp, -cy*cp]);
     if(gyroActive){
-      // Gyro attitude is used untouched; the horizon-locked drag offset
-      // is applied in the world frame on top of it.
-      m=matMul3(m, qToMat3ColumnMajor(gyroQuaternion()));
+      // Gyro (phone SBS path only): do NOT use the quaternion attitude
+      // as-is — it carries the device roll, which tilts the horizon.
+      // Take only its forward vector and rebuild the right/up basis
+      // from it with the exact same construction as the drag path
+      // (matFromForward: right = normalize(cross(f, world up)), so the
+      // right vector is horizontal by construction). Yaw and pitch of
+      // the gyro forward are preserved; roll is discarded.
+      var gm=qToMat3ColumnMajor(gyroQuaternion());
+      // Forward = -(third column) of the attitude matrix.
+      var gf=[-gm[6], -gm[7], -gm[8]];
+      var gl=Math.sqrt(gf[0]*gf[0]+gf[1]*gf[1]+gf[2]*gf[2]);
+      if(gl>1e-6){ gf=[gf[0]/gl, gf[1]/gl, gf[2]/gl]; }
+      var gyroLocked=matFromForward(gf);
+      // Drag offset stays applied in the world frame on top of the
+      // horizon-locked gyro attitude, as before.
+      m=matMul3(m, gyroLocked);
     }
     // Recenter offset (identity until the user recenters).
-    return matMul3(recenterMat, m);
+    m=matMul3(recenterMat, m);
+    // Final horizon lock for the phone SBS path: composing the drag,
+    // gyro and recenter rotations could reintroduce a small roll even
+    // though each factor is level on its own, so rebuild the result
+    // once more from its own forward vector. The forward (yaw + pitch)
+    // is preserved exactly, and the returned right vector is exactly
+    // horizontal (y = 0), so the horizon tilt is 0 degrees on both the
+    // drag path and the gyro path. (WebXR does not use this function
+    // and keeps the headset pose untouched.)
+    var f=[-m[6], -m[7], -m[8]];
+    var fl=Math.sqrt(f[0]*f[0]+f[1]*f[1]+f[2]*f[2]);
+    if(fl>1e-6){ f=[f[0]/fl, f[1]/fl, f[2]/fl]; }
+    return matFromForward(f);
   }
 
   /* ---------- gyro ---------- */
@@ -1149,17 +1178,29 @@
   /* ---------- gaze control ----------
      Hands-free operation for headset use: a reticle sits at the centre
      of each eye, and looking at a target for a fixed dwell time presses
-     it. The idle "メニュー" target floats just below the current front;
-     dwelling on it (0.8s) opens the menu panel anchored at the current
-     gaze centre in the video space, so the panel stays put in the world
-     while the user looks around it. Items need 1.2s. Executing an item
-     closes the menu; 5s without looking at any item closes it too.
+     it. The idle "メニュー" target is hidden by default so nothing is
+     pasted over the video: it only appears in the lower part of the
+     view while the current view is pitched down past about -20
+     degrees (GAZE_SHOW_PITCH). Dwelling on the appeared target (0.8s)
+     opens the menu panel anchored at the current gaze centre in the
+     video space, so the panel stays put in the world while the user
+     looks around it. Items need 1.2s. Executing an item closes the
+     menu; 5s without looking at any item closes it too.
      The same state machine runs for the phone SBS mode (DOM overlay,
      gaze = screen centre, gyro or drag alike) and for WebXR (GL overlay
      projected per view, gaze = camera forward). All anchors are
      direction vectors in the (recentred) video space. */
   var GAZE_MENU_DWELL=800, GAZE_ITEM_DWELL=1200, GAZE_AUTOCLOSE=5000;
   var GAZE_MENU_ANGLE=0.19, GAZE_ITEM_ANGLE=0.165;
+  // View pitch (radians) below which the menu target becomes visible:
+  // about -20 degrees. At or above this pitch the target is fully
+  // hidden and no dwell can start.
+  var GAZE_SHOW_PITCH=-0.3491;
+  // Pitch (degrees) at which the menu target sits: fixed below the
+  // horizon in the current facing direction, so once the user looks
+  // down past -20 degrees it is already in the lower part of the view,
+  // and looking a little further down centres it for the dwell.
+  var GAZE_MENU_PITCH_DEG=-36;
   // The reticle is hidden by default. It appears only when the gaze
   // comes within this angle of the menu target (looking toward it), or
   // while the menu panel is open.
@@ -1167,7 +1208,8 @@
   var gazeBasisMat=null;
   var gaze={ state:'idle', idleDir:null, menuDir:null, menuR:null, menuU:null,
              dwellId:null, dwellStart:0, progress:0, lastItemGaze:0,
-             farSince:0, cooldownUntil:0, basis:null, reticleShow:false };
+             farSince:0, cooldownUntil:0, basis:null, reticleShow:false,
+             targetVisible:false };
   var GAZE_ITEMS=[
     {id:'play',     icon:'▶', label:'再生',       tx: 0,    ty: 0   },
     {id:'back',     icon:'⏪', label:'10秒戻る',   tx:-0.46, ty: 0   },
@@ -1178,7 +1220,7 @@
   function gazeReset(){
     gaze.state='idle'; gaze.idleDir=null; gaze.menuDir=null;
     gaze.dwellId=null; gaze.progress=0; gaze.farSince=0; gaze.cooldownUntil=0;
-    gaze.reticleShow=false;
+    gaze.reticleShow=false; gaze.targetVisible=false;
   }
   function dot3(a,b){ return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
   function norm3(a){
@@ -1195,13 +1237,19 @@
     return Math.acos(c);
   }
   function gazeAnchorIdle(b){
-    var c=0.8090, s=0.5878; // 36 degrees below the current front: low in
-    // the view, down in the black space under the picture, out of the way
-    gaze.idleDir=norm3([
-      b.f[0]*c - b.u[0]*s,
-      b.f[1]*c - b.u[1]*s,
-      b.f[2]*c - b.u[2]*s
-    ]);
+    // The target sits at a fixed pitch of GAZE_MENU_PITCH_DEG (-36 deg)
+    // in the direction the user currently faces (same yaw as the view
+    // forward, pitch taken from the horizon, not from the view itself).
+    // Recomputed every frame from the forward's yaw only, so pitching
+    // the view down moves the gaze toward the target without the target
+    // itself moving, and yawing keeps the target directly below.
+    var yawA=Math.atan2(-b.f[0], -b.f[2]);
+    var cp=Math.cos(GAZE_MENU_PITCH_DEG*Math.PI/180); // 0.8090
+    var sp=Math.sin(GAZE_MENU_PITCH_DEG*Math.PI/180); // -0.5878
+    gaze.idleDir=[-Math.sin(yawA)*cp, sp, -Math.cos(yawA)*cp];
+  }
+  function gazeViewPitch(b){
+    return Math.asin(Math.max(-1, Math.min(1, b.f[1])));
   }
   function gazeItemDir(it){
     return norm3([
@@ -1261,24 +1309,28 @@
   }
   function gazeUpdateFrame(){
     var now=performance.now();
-    if(!settings.gaze || (!vrMode && !xrSession)){ gaze.dwellId=null; gaze.progress=0; gaze.reticleShow=false; return; }
+    if(!settings.gaze || (!vrMode && !xrSession)){ gaze.dwellId=null; gaze.progress=0; gaze.reticleShow=false; gaze.targetVisible=false; return; }
     var b=gazeBasisNow();
     if(!b) return;
     gaze.basis=b;
     if(gaze.state==='idle'){
-      if(!gaze.idleDir) gazeAnchorIdle(b);
+      // The menu target is completely hidden while the view faces
+      // forward or up. It only appears once the view pitch drops
+      // below about -20 degrees, in the lower part of the view.
+      gaze.targetVisible = gazeViewPitch(b) < GAZE_SHOW_PITCH;
+      gazeAnchorIdle(b);
+      if(!gaze.targetVisible){
+        gaze.dwellId=null; gaze.progress=0; gaze.reticleShow=false; gaze.farSince=0;
+        return;
+      }
       var ang=gazeAngle(b.f, gaze.idleDir);
       // Reticle shows only while looking toward the menu target.
       gaze.reticleShow = ang<GAZE_RETICLE_NEAR;
-      if(ang>0.9){
-        // Target is far off-view (e.g. the user turned around): let it
-        // slowly follow to below the new front so it stays reachable.
-        if(!gaze.farSince) gaze.farSince=now;
-        else if(now-gaze.farSince>1500){ gazeAnchorIdle(b); gaze.farSince=0; }
-      } else gaze.farSince=0;
+      gaze.farSince=0;
       var hit=(ang<GAZE_MENU_ANGLE && now>=gaze.cooldownUntil) ? 'menu' : null;
       if(gazeDwellTick(hit, GAZE_MENU_DWELL, now)) gazeOpenMenu(b, now);
     } else {
+      gaze.targetVisible=false;
       // Menu open: the reticle stays visible for aiming at the items.
       gaze.reticleShow=true;
       var best=null, bestAng=1e9;
@@ -1361,7 +1413,8 @@
       if(gaze.state==='idle'){
         ge.panel.hidden=true;
         GAZE_ITEMS.forEach(function(it){ ge.items[it.id].el.hidden=true; });
-        gazePlace(ge.menuBtn, gaze.idleDir?gazeProject(gaze.idleDir, b, asp, asp, 1, 1):null, W, H);
+        // Hidden unless the view is pitched down (gaze.targetVisible).
+        gazePlace(ge.menuBtn, (gaze.targetVisible && gaze.idleDir)?gazeProject(gaze.idleDir, b, asp, asp, 1, 1):null, W, H);
         ge.menuBtn.classList.toggle('gazed', gaze.dwellId==='menu');
       } else {
         ge.menuBtn.hidden=true;
@@ -1522,7 +1575,8 @@
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     if(gaze.state==='idle'){
-      if(gaze.idleDir){
+      // Hidden unless the view is pitched down (gaze.targetVisible).
+      if(gaze.targetVisible && gaze.idleDir){
         gazeQuadXR(gazeProject(gaze.idleDir, b, tans[0], tans[1], tans[2], tans[3]),
           0.095, 0.05, tans, 0, gazeTex.menu, gaze.dwellId==='menu', 0);
       }
