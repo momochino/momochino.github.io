@@ -164,7 +164,7 @@
       <input class="seek" id="seek" type="range" min="0" max="1000" step="1" value="0" aria-label="再生位置">
       <span class="time" id="timeText">0:00 / 0:00</span>
     </div>
-    <button class="vr-big" id="vrBtn" type="button">VRで見る<small>ゴーグルで見る場合はこちら</small></button>
+    <button class="vr-big" id="vrBtn" type="button">VRで見る<small id="vrBtnSub">ゴーグルで見る場合はこちら</small></button>
 
     <section class="works" id="worksSection" hidden aria-label="作品リスト">
       <h2>作品リスト</h2>
@@ -613,7 +613,11 @@
     log('VRモード: 終了', 'ev');
     setTimeout(resize, 60);
   }
-  document.getElementById('vrBtn').addEventListener('click', enterVr);
+  document.getElementById('vrBtn').addEventListener('click', function(){
+    // Headsets with WebXR get the immersive mode; everything else keeps
+    // the phone SBS mode, exactly as before.
+    if(xrSupported) enterXr(); else enterVr();
+  });
   document.getElementById('vrExitBtn').addEventListener('click', function(){ exitVr(); });
   function onFsChange(){
     var el=fsElementNow();
@@ -627,6 +631,148 @@
   }
   document.addEventListener('fullscreenchange', onFsChange);
   document.addEventListener('webkitfullscreenchange', onFsChange);
+
+  /* ---------- WebXR immersive mode (Quest, Pico, ... built-in browsers) ----------
+     Same equirect sampling shader as the phone path. Per eye, the view's
+     projectionMatrix gives the (asymmetric) frustum tangents and the
+     view's pose gives the rotation, so each eye samples its own half of
+     the SBS frame. No viewer-side distortion correction and no IPD shift
+     here: the headset does its own lens correction and the XR views
+     already carry the real eye positions. The phone path is untouched
+     and stays the fallback wherever immersive-vr is unavailable. */
+  var xrSupported=false;
+  var xrSession=null, xrRefSpace=null, xrLayer=null;
+  var xrYawOffset=0;                 // sampling-side yaw offset (recenter equivalent)
+  var xrHeadYaw=0, xrHeadYawValid=false;
+
+  if('xr' in navigator && navigator.xr && typeof navigator.xr.isSessionSupported==='function'){
+    navigator.xr.isSessionSupported('immersive-vr').then(function(ok){
+      xrSupported=!!ok;
+      if(ok){
+        log('WebXR: immersive-vr に対応しています（「VRで見る」で没入モードに入ります）', 'ok');
+        var sub=document.getElementById('vrBtnSub');
+        if(sub) sub.textContent='ヘッドセットでは没入モード（WebXR）で開きます';
+      } else {
+        log('WebXR: immersive-vr 非対応のため、スマホ方式で表示します');
+      }
+    }).catch(function(err){
+      log('WebXR: 対応確認に失敗しました（スマホ方式で続けます）: '+(err.message||err), 'ev');
+    });
+  } else {
+    log('WebXR: このブラウザでは使えないため、スマホ方式で表示します');
+  }
+
+  function xrRecenter(){
+    if(!xrHeadYawValid) return;
+    // Rotate sampling so the direction the user faces now becomes front.
+    xrYawOffset=-xrHeadYaw;
+    log('WebXR: 正面をリセットしました（ヨーオフセット '+(xrYawOffset*180/Math.PI).toFixed(1)+'°）', 'ok');
+  }
+
+  function onXrFrame(time, frame){
+    if(!xrSession) return;
+    xrSession.requestAnimationFrame(onXrFrame);
+    if(!xrRefSpace || !xrLayer) return;
+    uploadVideoTexture();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, xrLayer.framebuffer);
+    gl.disable(gl.DEPTH_TEST);
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    var pose=frame.getViewerPose(xrRefSpace);
+    if(!pose) return;
+    var o=pose.transform.orientation;
+    var om=qToMat3ColumnMajor([o.x, o.y, o.z, o.w]);
+    // Head forward = image of (0,0,-1) = -(third column); yaw as in the
+    // drag convention, used by xrRecenter().
+    xrHeadYaw=Math.atan2(om[6], om[8]);
+    xrHeadYawValid=true;
+    gl.uniform1f(uDistort, 0);
+    gl.uniform1f(uIpd, 0);
+    var cy=Math.cos(xrYawOffset), sy=Math.sin(xrYawOffset);
+    var yawM=new Float32Array([cy,0,-sy, 0,1,0, sy,0,cy]); // Ry(xrYawOffset), column-major
+    for(var i=0;i<pose.views.length;i++){
+      var view=pose.views[i];
+      var vp=xrLayer.getViewport(view);
+      gl.viewport(vp.x, vp.y, vp.width, vp.height);
+      var vm=view.transform.matrix;
+      var mc=new Float32Array([vm[0],vm[1],vm[2], vm[4],vm[5],vm[6], vm[8],vm[9],vm[10]]);
+      gl.uniformMatrix3fv(uRot, false, matMul3(yawM, mc));
+      var pm=view.projectionMatrix;
+      gl.uniform4f(uFrustum,
+        (1-pm[8])/pm[0], (1+pm[8])/pm[0],
+        (1-pm[9])/pm[5], (1+pm[9])/pm[5]);
+      var eyeIdx=(view.eye==='right')?1:0;
+      if(settings.swap) eyeIdx=1-eyeIdx;
+      gl.uniform1f(uEye, eyeIdx);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  function onXrSessionEnd(){
+    log('WebXR: セッションが終了しました。スタート画面に戻ります', 'ev');
+    xrSession=null; xrRefSpace=null; xrLayer=null; xrHeadYawValid=false;
+    try{ gl.bindFramebuffer(gl.FRAMEBUFFER, null); }catch(e){}
+    resize();
+  }
+
+  function enterXr(){
+    if(!hasVideo()){
+      setLoadStatus('まだ動画が読み込まれていません。下の「詳細・その他の操作」から動画リンクを貼ってください', 'ng');
+      openDetails(); urlInput.focus();
+      return;
+    }
+    video.muted=false;
+    if(video.paused) tryPlay('VR開始時');
+    xrYawOffset=0; xrHeadYawValid=false;
+    log('WebXR: immersive-vr セッションを要求します…');
+    navigator.xr.requestSession('immersive-vr', {optionalFeatures:['local-floor']}).then(function(session){
+      xrSession=session;
+      session.addEventListener('end', onXrSessionEnd);
+      session.addEventListener('select', function(){
+        // Controller trigger / gaze select toggles play-pause.
+        if(video.paused){ video.muted=false; tryPlay('WebXR select'); }
+        else { video.pause(); log('WebXR: 一時停止しました（select）'); }
+      });
+      session.addEventListener('squeeze', function(){ xrRecenter(); });
+      function setup(){
+        if(typeof XRWebGLLayer==='undefined'){
+          log('WebXR: XRWebGLLayer が使えないため、没入モードを開始できません', 'ng');
+          try{ session.end(); }catch(e){}
+          return;
+        }
+        xrLayer=new XRWebGLLayer(session, gl);
+        session.updateRenderState({baseLayer: xrLayer});
+        session.requestReferenceSpace('local-floor').then(function(rs){
+          xrRefSpace=rs;
+          log('WebXR: 参照空間 = local-floor', 'ok');
+        }).catch(function(){
+          return session.requestReferenceSpace('local').then(function(rs){
+            xrRefSpace=rs;
+            log('WebXR: 参照空間 = local（local-floor が使えないため）', 'ok');
+          });
+        }).then(function(){
+          log('WebXR: 没入モードを開始しました', 'ok');
+          session.requestAnimationFrame(onXrFrame);
+        }).catch(function(err){
+          log('WebXR: 参照空間を取得できませんでした: '+(err.message||err), 'ng');
+          try{ session.end(); }catch(e){}
+        });
+      }
+      if(typeof gl.makeXRCompatible==='function'){
+        gl.makeXRCompatible().then(function(){ setup(); }, function(err){
+          log('WebXR: makeXRCompatible に失敗しました（このまま続行します）: '+(err.message||err), 'ev');
+          setup();
+        });
+      } else {
+        setup();
+      }
+    }).catch(function(err){
+      xrSession=null;
+      log('WebXR: セッションを開始できませんでした: '+(err.name||'')+' '+(err.message||err), 'ng');
+      setLoadStatus('VRモードを開始できませんでした', 'ng');
+    });
+  }
 
   /* ---------- recenter ----------
      Takes the direction currently shown at the center as the new front,
@@ -810,7 +956,7 @@
   }
 
   /* ---------- WebGL ---------- */
-  var gl = canvas.getContext('webgl', {antialias:false, alpha:false}) || canvas.getContext('experimental-webgl');
+  var gl = canvas.getContext('webgl', {antialias:false, alpha:false, xrCompatible:true}) || canvas.getContext('experimental-webgl');
   if(!gl){
     log('WebGL NG: コンテキストを取得できませんでした', 'ng');
     setLoadStatus('このブラウザでは映像を表示できません', 'ng');
@@ -830,7 +976,7 @@
     'uniform sampler2D u_tex;',
     'uniform mat3 u_rot;',
     'uniform float u_eye;',      // 0 = left half, 1 = right half
-    'uniform float u_aspect;',   // viewport aspect (w/h)
+    'uniform vec4 u_frustum;',   // per-eye frustum tangents: x=left, y=right, z=bottom, w=top
     'uniform float u_distort;',  // 0 = off, 1 = recommended (verified weak), 2 = strong
     'uniform float u_ipd;',      // per-eye horizontal shift (texture units)
     'const float PI = 3.141592653589793;',
@@ -846,8 +992,14 @@
     '    else { f = 0.96 * (1.0 + 0.10*r2 + 0.02*r2*r2); }',
     '    p = p * f;',
     '  }',
-    // 90 deg vertical FOV -> tan(45deg) = 1.0 ; forward = -Z
-    '  vec3 dirCam = normalize(vec3(p.x * u_aspect, p.y, -1.0));',
+    // Ray through this pixel from the per-eye frustum tangents; the phone
+    // path passes symmetric tangents (left=right=aspect, bottom=top=1,
+    // i.e. the verified 90 deg vertical FOV), XR passes each view's real
+    // asymmetric tangents from its projectionMatrix.
+    '  vec3 dirCam = normalize(vec3(',
+    '    mix(-u_frustum.x, u_frustum.y, p.x * 0.5 + 0.5),',
+    '    mix(-u_frustum.z, u_frustum.w, p.y * 0.5 + 0.5),',
+    '    -1.0));',
     '  vec3 dir = u_rot * dirCam;',
     '  if(dir.z > 0.0){ gl_FragColor = vec4(0.0,0.0,0.0,1.0); return; }',
     '  float yawAngle = atan(dir.x, -dir.z);',
@@ -883,7 +1035,7 @@
 
   var uRot=gl.getUniformLocation(prog,'u_rot'),
       uEye=gl.getUniformLocation(prog,'u_eye'),
-      uAspect=gl.getUniformLocation(prog,'u_aspect'),
+      uFrustum=gl.getUniformLocation(prog,'u_frustum'),
       uDistort=gl.getUniformLocation(prog,'u_distort'),
       uIpd=gl.getUniformLocation(prog,'u_ipd');
   gl.uniform1i(gl.getUniformLocation(prog,'u_tex'), 0);
@@ -898,6 +1050,7 @@
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0,0,0,255]));
 
   function resize(){
+    if(xrSession) return; // canvas size is owned by the XR layer during a session
     var w=stageEl.clientWidth, h=stageEl.clientHeight;
     var dpr=Math.min(window.devicePixelRatio||1, 2);
     var cw=Math.max(2, Math.round(w*dpr)), ch=Math.max(2, Math.round(h*dpr));
@@ -907,26 +1060,30 @@
   window.addEventListener('orientationchange', function(){ setTimeout(resize, 60); });
   resize();
 
+  function uploadVideoTexture(){
+    if(video.readyState < 2) return;
+    try{
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+      if(!texOkLogged){
+        texOkLogged=true;
+        log('texImage2D 成功 = CORS通過 ('+video.videoWidth+' x '+video.videoHeight+')', 'ok');
+      }
+    }catch(err){
+      if(!texNgLogged){
+        texNgLogged=true;
+        log('texImage2D 失敗 (CORS): '+(err.name||'Error')+' '+(err.message||err), 'ng');
+      }
+    }
+  }
+
   function frame(){
     requestAnimationFrame(frame);
+    if(xrSession) return; // the XR session's own loop renders while immersive
     resize();
     var W=canvas.width, H=canvas.height;
 
-    if(video.readyState >= 2){
-      try{
-        gl.bindTexture(gl.TEXTURE_2D, tex);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
-        if(!texOkLogged){
-          texOkLogged=true;
-          log('texImage2D 成功 = CORS通過 ('+video.videoWidth+' x '+video.videoHeight+')', 'ok');
-        }
-      }catch(err){
-        if(!texNgLogged){
-          texNgLogged=true;
-          log('texImage2D 失敗 (CORS): '+(err.name||'Error')+' '+(err.message||err), 'ng');
-        }
-      }
-    }
+    uploadVideoTexture();
 
     gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);
     gl.uniformMatrix3fv(uRot, false, buildRotationMatrix());
@@ -934,9 +1091,11 @@
 
     if(!vrMode){
       // Start screen: single-eye preview over the full stage (no SBS).
+      // Symmetric frustum tangents == the verified 90 deg vertical FOV.
+      var asp=W/Math.max(1,H);
       gl.viewport(0, 0, W, H);
       gl.uniform1f(uEye, settings.swap?1:0);
-      gl.uniform1f(uAspect, W/Math.max(1,H));
+      gl.uniform4f(uFrustum, asp, asp, 1, 1);
       gl.uniform1f(uIpd, 0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       return;
@@ -947,14 +1106,16 @@
     var ipd=settings.ipd/1000; // slider -30..30 -> -0.030..0.030 texture units
     gl.uniform1f(uIpd, ipd);
     // left viewport
+    var aspL=halfW/Math.max(1,H);
     gl.viewport(0, 0, halfW, H);
     gl.uniform1f(uEye, settings.swap?1:0);
-    gl.uniform1f(uAspect, (halfW/Math.max(1,H)));
+    gl.uniform4f(uFrustum, aspL, aspL, 1, 1);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     // right viewport
+    var aspR=(W-halfW)/Math.max(1,H);
     gl.viewport(halfW, 0, W-halfW, H);
     gl.uniform1f(uEye, settings.swap?0:1);
-    gl.uniform1f(uAspect, ((W-halfW)/Math.max(1,H)));
+    gl.uniform4f(uFrustum, aspR, aspR, 1, 1);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
   requestAnimationFrame(frame);
