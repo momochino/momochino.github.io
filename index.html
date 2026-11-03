@@ -139,13 +139,17 @@
      pitched down past about -40 degrees (see GAZE_SHOW_PITCH). */
   .gaze-menu-btn{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(8,11,17,.42);border:1px solid rgba(255,255,255,.32);color:rgba(255,255,255,.78);border-radius:16px;padding:5px 11px;font-size:11.5px;font-weight:600;white-space:nowrap;letter-spacing:.04em;opacity:.72;transition:none;animation:none}
   .gaze-menu-btn.gazed{border-color:var(--accent)}
-  /* Menu panel: no transitions or animations at all. The panel is
-     anchored in the video space at the instant it opens and must appear
-     exactly there, instantly — any easing/lag reads as swimmy motion.
+  /* Menu panel: HEAD-LOCKED. While open, the whole panel (one wrapper
+     per eye, built once) sits fixed at the centre of the eye's view and
+     never moves, eases or lags — any such motion reads as swimming, and
+     independently re-projected items drift apart and double up in
+     stereo view. Only the reticle (cursor) moves inside the panel,
+     driven by the head's rotation delta since the panel opened.
      Gaze feedback on any target is the border colour only, plus the
      reticle's circular progress: no item ever scales, moves, floats or
      otherwise transforms when looked at (see also .gaze-item.gazed). */
-  .gaze-panel-bg{position:absolute;left:50%;top:50%;width:308px;height:252px;transform:translate(-50%,-50%);background:rgba(4,6,10,.72);border:1px solid rgba(255,255,255,.28);border-radius:16px;transition:none;animation:none}
+  .gaze-panel-wrap{position:absolute;left:50%;top:50%;width:404px;height:268px;transform:translate(-50%,-50%);transition:none;animation:none}
+  .gaze-panel-bg{position:absolute;inset:0;background:rgba(4,6,10,.72);border:1px solid rgba(255,255,255,.28);border-radius:16px;transition:none;animation:none}
   .gaze-item{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:124px;min-height:66px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;background:rgba(10,14,22,.92);border:1.5px solid rgba(255,255,255,.4);border-radius:12px;color:#fff;text-align:center;padding:6px 4px;transition:none;animation:none}
   .gaze-item .gi-icon{font-size:19px;line-height:1.15}
   .gaze-item .gi-label{font-size:13.5px;font-weight:700;line-height:1.25;white-space:nowrap}
@@ -1187,14 +1191,17 @@
      pasted over the video: it only appears in the lower part of the
      view while the current view is pitched down past about -40
      degrees (GAZE_SHOW_PITCH). Dwelling on the appeared target (0.8s)
-     opens the menu panel anchored at the current gaze centre in the
-     video space, so the panel stays put in the world while the user
-     looks around it. Items need 1.2s. Executing an item closes the
-     menu; 5s without looking at any item closes it too.
+     opens the menu panel HEAD-LOCKED: while open, the panel stays
+     fixed at the centre of the view (one element per eye, never
+     rebuilt, so it can never double up), and the reticle becomes a
+     cursor that moves inside the panel by the head's rotation delta
+     from the instant the panel opened — small head movements carry it
+     onto an item, and dwelling there (1.2s) presses it. Closing the
+     panel returns the cursor to the centre. Executing an item closes
+     the menu; 5s without the cursor on any item closes it too.
      The same state machine runs for the phone SBS mode (DOM overlay,
      gaze = screen centre, gyro or drag alike) and for WebXR (GL overlay
-     projected per view, gaze = camera forward). All anchors are
-     direction vectors in the (recentred) video space. */
+     projected per view, gaze = camera forward). */
   var GAZE_MENU_DWELL=800, GAZE_ITEM_DWELL=1200, GAZE_AUTOCLOSE=5000;
   var GAZE_MENU_ANGLE=0.19, GAZE_ITEM_ANGLE=0.165;
   // View pitch (radians) below which the menu target becomes visible:
@@ -1211,8 +1218,19 @@
   // comes within this angle of the menu target (looking toward it), or
   // while the menu panel is open.
   var GAZE_RETICLE_NEAR=0.35;
+  // Head-locked panel cursor: while the panel is open, the cursor's
+  // offset inside the panel is the tangent of the head's yaw/pitch
+  // delta since the panel opened, amplified by GAZE_CURSOR_GAIN so
+  // small head movements reach every item, and clamped so the cursor
+  // never leaves the panel.
+  var GAZE_CURSOR_GAIN=1.8, GAZE_CURSOR_MAX_X=0.66, GAZE_CURSOR_MAX_Y=0.52;
+  // Panel geometry shared by the DOM overlay: the panel box in px and
+  // the px-per-tangent-unit scale that maps the items' tx/ty layout
+  // offsets (and the cursor's tangent offsets) into that box.
+  var GAZE_PANEL_W=404, GAZE_PANEL_H=268, GAZE_LAYOUT_X=290, GAZE_LAYOUT_Y=235;
   var gazeBasisMat=null;
-  var gaze={ state:'idle', idleDir:null, menuDir:null, menuR:null, menuU:null,
+  var gaze={ state:'idle', idleDir:null, openYaw:0, openPitch:0, menuOpen:false,
+             cursorX:0, cursorY:0,
              dwellId:null, dwellStart:0, progress:0, lastItemGaze:0,
              farSince:0, cooldownUntil:0, basis:null, reticleShow:false,
              targetVisible:false };
@@ -1231,15 +1249,12 @@
     {id:'close',    icon:'✕', label:'',           tx: 0.46, ty: 0.34}
   ];
   function gazeReset(){
-    gaze.state='idle'; gaze.idleDir=null; gaze.menuDir=null;
+    gaze.state='idle'; gaze.idleDir=null; gaze.menuOpen=false;
+    gaze.cursorX=0; gaze.cursorY=0;
     gaze.dwellId=null; gaze.progress=0; gaze.farSince=0; gaze.cooldownUntil=0;
     gaze.reticleShow=false; gaze.targetVisible=false;
   }
   function dot3(a,b){ return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
-  function norm3(a){
-    var l=Math.sqrt(dot3(a,a))||1;
-    return [a[0]/l, a[1]/l, a[2]/l];
-  }
   function gazeBasisNow(){
     var m=gazeBasisMat;
     if(!m) return null;
@@ -1264,13 +1279,6 @@
   function gazeViewPitch(b){
     return Math.asin(Math.max(-1, Math.min(1, b.f[1])));
   }
-  function gazeItemDir(it){
-    return norm3([
-      gaze.menuDir[0] + gaze.menuR[0]*it.tx + gaze.menuU[0]*it.ty,
-      gaze.menuDir[1] + gaze.menuR[1]*it.tx + gaze.menuU[1]*it.ty,
-      gaze.menuDir[2] + gaze.menuR[2]*it.tx + gaze.menuU[2]*it.ty
-    ]);
-  }
   function gazeDwellTick(id, dur, now){
     if(!id){ gaze.dwellId=null; gaze.progress=0; return false; }
     if(gaze.dwellId!==id){ gaze.dwellId=id; gaze.dwellStart=now; gaze.progress=0; return false; }
@@ -1279,12 +1287,16 @@
     return false;
   }
   function gazeOpenMenu(b, now){
-    // The panel is anchored to the gaze direction at this exact instant,
-    // in the video space, and is never re-anchored or eased while open:
-    // from here on the head (and only the reticle with it) moves, the
-    // panel stays where it was opened. No animation on display either.
-    gaze.state='menu';
-    gaze.menuDir=b.f.slice(); gaze.menuR=b.r.slice(); gaze.menuU=b.u.slice();
+    // Head-locked: the panel itself is rendered fixed at the centre of
+    // the view (see the overlays) and never moves while open. What is
+    // captured here is the head's yaw/pitch at this exact instant: from
+    // here on, the cursor's position inside the panel is the head's
+    // yaw/pitch delta from these values, so the panel stays put and
+    // only the cursor travels. No animation on display either.
+    gaze.state='menu'; gaze.menuOpen=true;
+    gaze.openYaw=Math.atan2(-b.f[0], -b.f[2]);
+    gaze.openPitch=Math.asin(Math.max(-1, Math.min(1, b.f[1])));
+    gaze.cursorX=0; gaze.cursorY=0;
     gaze.lastItemGaze=now;
     gaze.dwellId=null; gaze.progress=0;
     log('視線操作: メニューを開きました', 'ok');
@@ -1292,6 +1304,8 @@
   function gazeCloseMenu(now){
     gaze.state='idle';
     gaze.idleDir=null; // re-anchored below the new front on the next frame
+    gaze.menuOpen=false;
+    gaze.cursorX=0; gaze.cursorY=0; // cursor returns to the centre
     gaze.cooldownUntil=now+700;
     gaze.dwellId=null; gaze.progress=0;
     log('視線操作: メニューを閉じました', 'ev');
@@ -1348,14 +1362,32 @@
       if(gazeDwellTick(hit, GAZE_MENU_DWELL, now)) gazeOpenMenu(b, now);
     } else {
       gaze.targetVisible=false;
-      // Menu open: the reticle stays visible for aiming at the items.
+      if(!gaze.menuOpen){ gazeCloseMenu(now); return; }
+      // Menu open: the panel is head-locked at the centre of the view
+      // and the reticle stays visible as the cursor. The cursor offset
+      // is the tangent of the head's yaw/pitch delta from the values
+      // captured when the panel opened, amplified so small head
+      // movements reach every item, and clamped to the panel. Yaw and
+      // pitch are taken separately (yaw from the forward's horizontal
+      // direction, pitch from its height), so turning the head sideways
+      // never drags the cursor up or down, even from the steep
+      // downward pitch at which the panel opens.
       gaze.reticleShow=true;
-      var best=null, bestAng=1e9;
+      var curYaw=Math.atan2(-b.f[0], -b.f[2]);
+      var dYaw=curYaw-gaze.openYaw;
+      dYaw=Math.atan2(Math.sin(dYaw), Math.cos(dYaw));
+      var curPitch=Math.asin(Math.max(-1, Math.min(1, b.f[1])));
+      var ctx=-Math.tan(dYaw)*GAZE_CURSOR_GAIN;
+      var cty=Math.tan(curPitch-gaze.openPitch)*GAZE_CURSOR_GAIN;
+      gaze.cursorX=Math.max(-GAZE_CURSOR_MAX_X, Math.min(GAZE_CURSOR_MAX_X, ctx));
+      gaze.cursorY=Math.max(-GAZE_CURSOR_MAX_Y, Math.min(GAZE_CURSOR_MAX_Y, cty));
+      var best=null, bestD=1e9;
       for(var i=0;i<GAZE_ITEMS.length;i++){
-        var a=gazeAngle(b.f, gazeItemDir(GAZE_ITEMS[i]));
-        if(a<bestAng){ bestAng=a; best=GAZE_ITEMS[i].id; }
+        var dx=gaze.cursorX-GAZE_ITEMS[i].tx, dy=gaze.cursorY-GAZE_ITEMS[i].ty;
+        var d=Math.sqrt(dx*dx+dy*dy);
+        if(d<bestD){ bestD=d; best=GAZE_ITEMS[i].id; }
       }
-      if(bestAng>=GAZE_ITEM_ANGLE) best=null;
+      if(bestD>=GAZE_ITEM_ANGLE) best=null;
       if(best) gaze.lastItemGaze=now;
       else if(now-gaze.lastItemGaze>GAZE_AUTOCLOSE){ gazeCloseMenu(now); return; }
       if(gazeDwellTick(best, GAZE_ITEM_DWELL, now)){
@@ -1381,22 +1413,33 @@
     for(var e=0;e<2;e++){
       var eye=document.createElement('div');
       eye.className='gaze-eye e'+e;
+      // Exactly ONE panel subtree per eye, built once here and only
+      // shown/hidden afterwards — it is never rebuilt when the menu
+      // opens, so a second copy can never appear. The wrapper is
+      // head-locked at the eye's centre and its children (background +
+      // items) sit at fixed pixel offsets inside it, so nothing in the
+      // panel can drift, swim or overlap while the head moves.
+      var wrap=document.createElement('div');
+      wrap.className='gaze-panel-wrap'; wrap.hidden=true;
       var panel=document.createElement('div');
-      panel.className='gaze-panel-bg'; panel.hidden=true;
+      panel.className='gaze-panel-bg';
+      wrap.appendChild(panel);
       var menuBtn=document.createElement('div');
       menuBtn.className='gaze-menu-btn'; menuBtn.textContent='メニュー'; menuBtn.hidden=true;
-      eye.appendChild(panel); eye.appendChild(menuBtn);
+      eye.appendChild(wrap); eye.appendChild(menuBtn);
       var items={};
       GAZE_ITEMS.forEach(function(it){
         var el=document.createElement('div');
-        el.className='gaze-item'; el.hidden=true;
+        el.className='gaze-item';
+        el.style.left=(GAZE_PANEL_W/2 + it.tx*GAZE_LAYOUT_X)+'px';
+        el.style.top=(GAZE_PANEL_H/2 - it.ty*GAZE_LAYOUT_Y)+'px';
         var ic=document.createElement('span'); ic.className='gi-icon'; ic.textContent=it.icon;
         el.appendChild(ic);
         var lb=document.createElement('span'); lb.className='gi-label'; lb.textContent=it.label;
         // The close item is a plain "✕"-only button: no text label.
         if(it.id==='close'){ el.classList.add('gaze-close'); el.setAttribute('aria-label','閉じる'); }
         else el.appendChild(lb);
-        eye.appendChild(el);
+        wrap.appendChild(el);
         items[it.id]={el:el, icon:ic, label:lb};
       });
       var ret=document.createElement('div');
@@ -1405,7 +1448,7 @@
       ret.innerHTML='<svg viewBox="0 0 46 46" aria-hidden="true"><circle class="ring-bg" cx="23" cy="23" r="20"></circle><circle class="ring-fg" cx="23" cy="23" r="20" stroke-dasharray="125.7" stroke-dashoffset="125.7"></circle><circle class="dot" cx="23" cy="23" r="1.6"></circle></svg>';
       eye.appendChild(ret);
       gazeUi.appendChild(eye);
-      gazeEyes.push({ eye:eye, panel:panel, menuBtn:menuBtn, items:items, ret:ret,
+      gazeEyes.push({ eye:eye, wrap:wrap, menuBtn:menuBtn, items:items, ret:ret,
                       ring:ret.querySelector('.ring-fg') });
     }
   })();
@@ -1426,23 +1469,34 @@
     gazeEyes.forEach(function(ge){
       var W=ge.eye.clientWidth, H=ge.eye.clientHeight;
       var asp=W/Math.max(1,H);
-      ge.ret.hidden=!gaze.reticleShow;
       ge.ring.style.strokeDashoffset=String(125.7*(1-Math.max(0, Math.min(1, gaze.progress))));
       ge.items.play.icon.textContent=playIcon;
       ge.items.play.label.textContent=playLabel;
       if(gaze.state==='idle'){
-        ge.panel.hidden=true;
-        GAZE_ITEMS.forEach(function(it){ ge.items[it.id].el.hidden=true; });
+        ge.wrap.hidden=true;
+        // Panel closed: the cursor is back at the exact centre of the
+        // eye, and shown only while looking toward the menu target.
+        ge.ret.hidden=!gaze.reticleShow;
+        ge.ret.style.left='50%';
+        ge.ret.style.top='50%';
         // Hidden unless the view is pitched down (gaze.targetVisible).
         gazePlace(ge.menuBtn, (gaze.targetVisible && gaze.idleDir)?gazeProject(gaze.idleDir, b, asp, asp, 1, 1):null, W, H);
         ge.menuBtn.classList.toggle('gazed', gaze.dwellId==='menu');
       } else {
         ge.menuBtn.hidden=true;
-        gazePlace(ge.panel, gazeProject(gaze.menuDir, b, asp, asp, 1, 1), W, H);
+        // Head-locked panel: the wrapper stays at the eye's centre
+        // (only a fit-to-eye scale, fixed for a given eye size — it
+        // does not depend on the head). The reticle is the cursor: it
+        // sits at the panel centre plus the head-delta offset.
+        ge.wrap.hidden=false;
+        var fit=Math.min(1, (W-10)/GAZE_PANEL_W, (H-10)/GAZE_PANEL_H);
+        if(!(fit>0)) fit=1;
+        ge.wrap.style.transform='translate(-50%,-50%) scale('+fit+')';
+        ge.ret.hidden=false;
+        ge.ret.style.left=(W/2 + gaze.cursorX*GAZE_LAYOUT_X*fit)+'px';
+        ge.ret.style.top=(H/2 - gaze.cursorY*GAZE_LAYOUT_Y*fit)+'px';
         GAZE_ITEMS.forEach(function(it){
-          var el=ge.items[it.id].el;
-          gazePlace(el, gazeProject(gazeItemDir(it), b, asp, asp, 1, 1), W, H);
-          el.classList.toggle('gazed', gaze.dwellId===it.id);
+          ge.items[it.id].el.classList.toggle('gazed', gaze.dwellId===it.id);
         });
       }
     });
@@ -1601,21 +1655,35 @@
         gazeQuadXR(gazeProject(gaze.idleDir, b, tans[0], tans[1], tans[2], tans[3]),
           0.095, 0.05, tans, 0, gazeTex.menu, gaze.dwellId==='menu', 0);
       }
-    } else if(gaze.menuDir){
-      gazeQuadXR(gazeProject(gaze.menuDir, b, tans[0], tans[1], tans[2], tans[3]),
-        0.56, 0.45, tans, 1, null, false, 0);
-      for(var i=0;i<GAZE_ITEMS.length;i++){
-        var it=GAZE_ITEMS[i];
-        var tx=(it.id==='play') ? (video.paused?gazeTex.play:gazeTex.pause) : gazeTex[it.id];
-        gazeQuadXR(gazeProject(gazeItemDir(it), b, tans[0], tans[1], tans[2], tans[3]),
-          0.22, 0.12, tans, 0, tx, gaze.dwellId===it.id, 0);
+    } else if(gaze.state==='menu'){
+      // Head-locked, same as the phone overlay: every quad is placed
+      // relative to this view's projected centre, so the panel stays
+      // exactly in the middle of the view and the items keep their
+      // fixed layout inside it, whatever the head does.
+      var c0=gazeProject(b.f, b, tans[0], tans[1], tans[2], tans[3]);
+      if(c0){
+        var sxr=2/(tans[0]+tans[1]), syr=2/(tans[2]+tans[3]);
+        gazeQuadXR(c0, 0.74, 0.60, tans, 1, null, false, 0);
+        for(var i=0;i<GAZE_ITEMS.length;i++){
+          var it=GAZE_ITEMS[i];
+          var itx=(it.id==='play') ? (video.paused?gazeTex.play:gazeTex.pause) : gazeTex[it.id];
+          gazeQuadXR({x:c0.x+it.tx*sxr, y:c0.y+it.ty*syr},
+            0.22, 0.12, tans, 0, itx, gaze.dwellId===it.id, 0);
+        }
       }
     }
-    // Reticle last, on top, exactly at the gaze centre — but only
-    // while looking toward the menu target or while the menu is open;
-    // it stays hidden the rest of the time.
+    // Reticle last, on top — but only while looking toward the menu
+    // target or while the menu is open; it stays hidden the rest of
+    // the time. With the menu open it is the cursor: view centre plus
+    // the head-delta offset inside the panel. Otherwise it sits
+    // exactly at the gaze centre.
     if(gaze.reticleShow){
-      gazeQuadXR(gazeProject(b.f, b, tans[0], tans[1], tans[2], tans[3]),
+      var rp=gazeProject(b.f, b, tans[0], tans[1], tans[2], tans[3]);
+      if(rp && gaze.state==='menu'){
+        rp={ x: rp.x + gaze.cursorX*2/(tans[0]+tans[1]),
+             y: rp.y + gaze.cursorY*2/(tans[2]+tans[3]) };
+      }
+      gazeQuadXR(rp,
         0.026, 0.026, tans, 2, null, false, Math.max(0, Math.min(1, gaze.progress)));
     }
     gl.disable(gl.BLEND);
