@@ -90,6 +90,23 @@
   #log .ng{color:#ff8a8a}
   #log .ev{color:#a9c6ff}
 
+  /* ---------- works list ---------- */
+  .works{border-top:1px solid var(--line);padding-top:11px;display:flex;flex-direction:column;gap:8px}
+  .works h2{margin:0;font-size:15px;font-weight:800}
+  .works .note{margin-top:-2px}
+  .work{border:1px solid var(--line);border-radius:10px;background:rgba(10,13,19,.55);overflow:hidden}
+  .work-main{appearance:none;border:0;background:transparent;color:var(--text);width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 12px;text-align:left}
+  .work-info{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .work-title{font-size:14.5px;font-weight:700;line-height:1.4;word-break:break-word}
+  .work-date{font-size:12px;color:var(--muted)}
+  .work-badge{flex:0 0 auto;font-size:11.5px;font-weight:700;border-radius:20px;padding:4px 10px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+  .work-badge.unlocked{border-color:#2f7d4f;color:#7ee2a0}
+  .work-form{border-top:1px solid var(--line);padding:11px 12px;display:flex;flex-direction:column;gap:8px}
+  .work-form input{flex:1 1 auto;min-width:0;background:rgba(10,13,19,.92);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font-size:14px}
+  .work-form input::placeholder{color:var(--muted);font-size:12.5px}
+  .work-hint{font-size:11.5px;color:var(--muted);line-height:1.55;margin:0}
+  .work-error{font-size:12.5px;color:#ff9d9d;margin:0;font-weight:700}
+
   /* ---------- VR mode overlay ---------- */
   .vr-ui{position:absolute;inset:0;z-index:4;pointer-events:none;display:none}
   .vr-ui.show{display:block;animation:vrFadeIn .25s ease}
@@ -148,6 +165,13 @@
       <span class="time" id="timeText">0:00 / 0:00</span>
     </div>
     <button class="vr-big" id="vrBtn" type="button">VRで見る<small>ゴーグルで見る場合はこちら</small></button>
+
+    <section class="works" id="worksSection" hidden aria-label="作品リスト">
+      <h2>作品リスト</h2>
+      <p class="note">買った作品だけ、合言葉で開けます。</p>
+      <div id="worksList"></div>
+    </section>
+
     <div class="subrow">
       <button class="btn" id="settingsBtn" type="button" aria-expanded="false" aria-controls="settingsPanel">設定</button>
       <button class="btn" id="detailsBtn" type="button" aria-expanded="false" aria-controls="detailsPanel">詳細・その他の操作</button>
@@ -968,6 +992,207 @@
     log('?u= パラメータなし。URLを貼って「読込」を押してください');
   }
   log('初期化完了: スタート画面（片目プレビュー）/「VRで見る」でVRモードへ');
+
+  /* ---------- works list: per-work passphrase unlock ----------
+     works.json sits next to this page and lists every work with its
+     video URL encrypted (AES-256-GCM; key = PBKDF2-SHA256, 150,000
+     iterations, per-work salt, from the work's passphrase). Only a
+     buyer who knows a work's passphrase can open that work. If
+     works.json cannot be fetched, the section simply never appears. */
+  var worksSection=document.getElementById('worksSection');
+  var worksListEl=document.getElementById('worksList');
+  var PASS_KEY_PREFIX='vr180-work-pass:';
+  var worksById={};
+
+  function b64ToBytes(b64){
+    var bin=atob(String(b64||''));
+    var arr=new Uint8Array(bin.length);
+    for(var i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+    return arr;
+  }
+  function decryptWorkUrl(work, pass){
+    var enc=work.enc||{};
+    var salt=b64ToBytes(enc.salt), iv=b64ToBytes(enc.iv), data=b64ToBytes(enc.data);
+    return crypto.subtle.importKey('raw', new TextEncoder().encode(pass), {name:'PBKDF2'}, false, ['deriveKey'])
+      .then(function(baseKey){
+        return crypto.subtle.deriveKey(
+          {name:'PBKDF2', salt:salt, iterations:150000, hash:'SHA-256'},
+          baseKey, {name:'AES-GCM', length:256}, false, ['decrypt']);
+      })
+      .then(function(key){
+        return crypto.subtle.decrypt({name:'AES-GCM', iv:iv}, key, data);
+      })
+      .then(function(plain){
+        return new TextDecoder('utf-8').decode(plain);
+      });
+  }
+  function savedPass(id){
+    try{ return localStorage.getItem(PASS_KEY_PREFIX+id)||''; }catch(e){ return ''; }
+  }
+  function storePass(id, pass){
+    try{ localStorage.setItem(PASS_KEY_PREFIX+id, pass); }
+    catch(e){ log('合言葉の保存に失敗しました: '+(e.message||e), 'ng'); }
+  }
+  function forgetPass(id){
+    try{ localStorage.removeItem(PASS_KEY_PREFIX+id); }catch(e){}
+  }
+  function setWorkTitle(titleText){
+    document.getElementById('titleText').textContent=titleText;
+    document.getElementById('vrTitle').textContent=titleText;
+    document.title=titleText;
+  }
+  function openWork(entry){
+    setWorkTitle(entry.work.title||'VR180 Viewer');
+    log('作品を開きます: '+(entry.work.title||entry.work.id), 'ok');
+    loadUrl(entry.url);
+  }
+  function showWorkError(entry, msg){
+    entry.error.textContent=msg;
+    entry.error.hidden=false;
+  }
+  function markUnlocked(entry, url){
+    entry.unlocked=true;
+    entry.url=url;
+    entry.badge.textContent='解錠済み';
+    entry.badge.classList.add('unlocked');
+    entry.form.hidden=true;
+    entry.main.setAttribute('aria-expanded','false');
+  }
+  function tryUnlock(entry, pass, opts){
+    opts=opts||{};
+    if(!window.crypto || !crypto.subtle){
+      if(!opts.silent) showWorkError(entry, 'このブラウザでは合言葉を開けませんでした');
+      log('作品リスト: WebCryptoが使えないため復号できません', 'ng');
+      return Promise.resolve(false);
+    }
+    entry.openBtn.disabled=true;
+    entry.openBtn.textContent='確認中…';
+    return decryptWorkUrl(entry.work, pass).then(function(url){
+      entry.openBtn.disabled=false;
+      entry.openBtn.textContent='開く';
+      if(!url) throw new Error('復号結果が空でした');
+      storePass(entry.work.id, pass);
+      markUnlocked(entry, url);
+      log('作品を解錠しました: '+(entry.work.title||entry.work.id), 'ok');
+      if(opts.load) openWork(entry);
+      return true;
+    }).catch(function(err){
+      entry.openBtn.disabled=false;
+      entry.openBtn.textContent='開く';
+      // A wrong passphrase fails GCM authentication and lands here.
+      if(opts.fromSaved) forgetPass(entry.work.id);
+      if(!opts.silent) showWorkError(entry, '合言葉が違います');
+      log('作品の解錠に失敗しました: '+entry.work.id+' ('+(err.name||'')+' '+(err.message||err)+')', 'ng');
+      return false;
+    });
+  }
+  function formatWorkDate(d){
+    var m=String(d||'').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if(m) return m[1]+'年'+Number(m[2])+'月'+Number(m[3])+'日';
+    return String(d||'');
+  }
+  function buildWorkItem(work){
+    var wrap=document.createElement('div'); wrap.className='work';
+    var main=document.createElement('button');
+    main.type='button'; main.className='work-main'; main.setAttribute('aria-expanded','false');
+    var info=document.createElement('span'); info.className='work-info';
+    var ttl=document.createElement('span'); ttl.className='work-title'; ttl.textContent=work.title||'(タイトルなし)';
+    var date=document.createElement('span'); date.className='work-date'; date.textContent=formatWorkDate(work.date);
+    info.appendChild(ttl); info.appendChild(date);
+    var badge=document.createElement('span'); badge.className='work-badge'; badge.textContent='ロック中';
+    main.appendChild(info); main.appendChild(badge);
+
+    var form=document.createElement('div'); form.className='work-form'; form.hidden=true;
+    var row=document.createElement('div'); row.className='urlrow';
+    var input=document.createElement('input');
+    input.type='text'; input.autocomplete='off'; input.spellcheck=false;
+    input.setAttribute('autocapitalize','off');
+    input.placeholder='合言葉を入力'; input.setAttribute('aria-label','合言葉');
+    var openBtn=document.createElement('button');
+    openBtn.type='button'; openBtn.className='btn primary'; openBtn.textContent='開く';
+    row.appendChild(input); row.appendChild(openBtn);
+    var hint=document.createElement('p'); hint.className='work-hint';
+    hint.textContent='合言葉は、購入時のメールまたはPDFに書かれています。一度開ければ、この端末では次から入力なしで開けます。';
+    var error=document.createElement('p'); error.className='work-error'; error.hidden=true;
+    form.appendChild(row); form.appendChild(hint); form.appendChild(error);
+    wrap.appendChild(main); wrap.appendChild(form);
+
+    var entry={work:work, wrap:wrap, main:main, badge:badge, form:form, input:input,
+               openBtn:openBtn, error:error, unlocked:false, url:''};
+    main.addEventListener('click', function(){
+      if(entry.unlocked){ openWork(entry); return; }
+      var open=form.hidden;
+      form.hidden=!open;
+      main.setAttribute('aria-expanded', String(open));
+      if(open){ error.hidden=true; setTimeout(function(){ try{ input.focus(); }catch(e){} }, 30); }
+    });
+    function submit(){
+      var pass=input.value;
+      if(!pass){ showWorkError(entry, '合言葉を入力してください'); return; }
+      error.hidden=true;
+      tryUnlock(entry, pass, {load:true});
+    }
+    openBtn.addEventListener('click', submit);
+    input.addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); submit(); } });
+    input.addEventListener('input', function(){ error.hidden=true; });
+    return entry;
+  }
+  function expandWorkForm(entry){
+    entry.form.hidden=false;
+    entry.main.setAttribute('aria-expanded','true');
+  }
+  function handleWorkParams(){
+    // Purchase links: ?w=<work id>&k=<passphrase> unlocks and opens at once.
+    var w=params.get('w'), k=params.get('k');
+    if(!w) return;
+    var entry=worksById[w];
+    if(!entry){ log('作品リスト: ?w= の作品がリストにありません: '+w, 'ng'); return; }
+    log('作品リスト: ?w= で作品が指定されました: '+w);
+    if(entry.unlocked){ openWork(entry); return; }
+    if(k){
+      tryUnlock(entry, k, {load:true}).then(function(ok){
+        if(!ok) expandWorkForm(entry);
+      });
+    } else {
+      expandWorkForm(entry);
+    }
+  }
+  function renderWorks(works){
+    worksListEl.innerHTML='';
+    var entries=[];
+    works.forEach(function(work){
+      var entry=buildWorkItem(work);
+      worksById[work.id]=entry;
+      entries.push(entry);
+      worksListEl.appendChild(entry.wrap);
+    });
+    worksSection.hidden=false;
+    if(!hasVideo()) setLoadStatus('作品リストから、見たい作品を選んでください', '');
+    // Works unlocked on a previous visit reopen without typing.
+    var attempts=entries.map(function(entry){
+      var p=savedPass(entry.work.id);
+      if(p) return tryUnlock(entry, p, {silent:true, fromSaved:true});
+      return Promise.resolve(false);
+    });
+    Promise.all(attempts).then(handleWorkParams);
+  }
+  function fetchWorks(){
+    if(typeof fetch!=='function') return;
+    fetch('works.json', {cache:'no-store'}).then(function(res){
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      return res.json();
+    }).then(function(json){
+      var works=(json && Array.isArray(json.works)) ? json.works : [];
+      works=works.filter(function(w){ return w && w.id && w.enc && w.enc.data; });
+      if(!works.length){ log('作品リスト: works.json に作品がなかったため、リストは表示しません'); return; }
+      renderWorks(works);
+      log('作品リスト: '+works.length+'件を表示しました', 'ok');
+    }).catch(function(err){
+      // No works.json next to the page: not an error, the list stays hidden.
+      log('作品リスト: works.json が取得できなかったため、リストは表示しません（'+(err.message||err)+'）');
+    });
+  }
+  fetchWorks();
 })();
 </script>
 </body>
