@@ -123,18 +123,27 @@
   .gaze-ui.on{display:block}
   .gaze-eye{position:absolute;top:0;bottom:0;width:50%;overflow:hidden}
   .gaze-eye.e0{left:0}.gaze-eye.e1{left:50%}
-  .gaze-reticle{position:absolute;left:50%;top:50%;width:46px;height:46px;transform:translate(-50%,-50%)}
+  /* Reticle: deliberately small, thin and faint. Focusing on a large,
+     near, high-contrast reticle makes the video behind it swim in stereo
+     view, so it stays minimal — and it is only shown at all near the
+     menu target or while the menu is open (see gaze.reticleShow). */
+  .gaze-reticle{position:absolute;left:50%;top:50%;width:26px;height:26px;transform:translate(-50%,-50%);opacity:.72;transition:none;animation:none}
   .gaze-reticle svg{width:100%;height:100%;transform:rotate(-90deg)}
-  .gaze-reticle .ring-bg{fill:none;stroke:rgba(255,255,255,.35);stroke-width:3}
-  .gaze-reticle .ring-fg{fill:none;stroke:var(--accent);stroke-width:3.5;stroke-linecap:round}
-  .gaze-reticle .dot{fill:#fff}
-  .gaze-menu-btn{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(8,11,17,.82);border:1.5px solid rgba(255,255,255,.65);color:#fff;border-radius:22px;padding:9px 18px;font-size:14px;font-weight:700;white-space:nowrap;letter-spacing:.06em}
-  .gaze-menu-btn.gazed{border-color:var(--accent);color:var(--accent)}
-  .gaze-panel-bg{position:absolute;left:50%;top:50%;width:308px;height:252px;transform:translate(-50%,-50%);background:rgba(4,6,10,.72);border:1px solid rgba(255,255,255,.28);border-radius:16px}
-  .gaze-item{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:124px;min-height:66px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;background:rgba(10,14,22,.92);border:1.5px solid rgba(255,255,255,.4);border-radius:12px;color:#fff;text-align:center;padding:6px 4px}
+  .gaze-reticle .ring-bg{fill:none;stroke:rgba(255,255,255,.22);stroke-width:2}
+  .gaze-reticle .ring-fg{fill:none;stroke:var(--accent);stroke-width:2.4;stroke-linecap:round}
+  .gaze-reticle .dot{fill:rgba(255,255,255,.8)}
+  /* Menu target: small and translucent so it never feels pasted over
+     the video; it sits low in the view (anchor angle in gazeAnchorIdle). */
+  .gaze-menu-btn{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(8,11,17,.42);border:1px solid rgba(255,255,255,.32);color:rgba(255,255,255,.78);border-radius:16px;padding:5px 11px;font-size:11.5px;font-weight:600;white-space:nowrap;letter-spacing:.04em;opacity:.72;transition:none;animation:none}
+  .gaze-menu-btn.gazed{border-color:var(--accent);color:var(--accent);opacity:1}
+  /* Menu panel: no transitions or animations at all. The panel is
+     anchored in the video space at the instant it opens and must appear
+     exactly there, instantly — any easing/lag reads as swimmy motion. */
+  .gaze-panel-bg{position:absolute;left:50%;top:50%;width:308px;height:252px;transform:translate(-50%,-50%);background:rgba(4,6,10,.72);border:1px solid rgba(255,255,255,.28);border-radius:16px;transition:none;animation:none}
+  .gaze-item{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:124px;min-height:66px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;background:rgba(10,14,22,.92);border:1.5px solid rgba(255,255,255,.4);border-radius:12px;color:#fff;text-align:center;padding:6px 4px;transition:none;animation:none}
   .gaze-item .gi-icon{font-size:19px;line-height:1.15}
   .gaze-item .gi-label{font-size:13.5px;font-weight:700;line-height:1.25;white-space:nowrap}
-  .gaze-item.gazed{border-color:var(--accent);background:rgba(42,33,16,.95);transform:translate(-50%,-50%) scale(1.07)}
+  .gaze-item.gazed{border-color:var(--accent);background:rgba(42,33,16,.95)}
 
   @media (orientation:landscape) and (max-height:480px){
     .start-head h1{font-size:22px}
@@ -1151,10 +1160,14 @@
      direction vectors in the (recentred) video space. */
   var GAZE_MENU_DWELL=800, GAZE_ITEM_DWELL=1200, GAZE_AUTOCLOSE=5000;
   var GAZE_MENU_ANGLE=0.19, GAZE_ITEM_ANGLE=0.165;
+  // The reticle is hidden by default. It appears only when the gaze
+  // comes within this angle of the menu target (looking toward it), or
+  // while the menu panel is open.
+  var GAZE_RETICLE_NEAR=0.35;
   var gazeBasisMat=null;
   var gaze={ state:'idle', idleDir:null, menuDir:null, menuR:null, menuU:null,
              dwellId:null, dwellStart:0, progress:0, lastItemGaze:0,
-             farSince:0, cooldownUntil:0, basis:null };
+             farSince:0, cooldownUntil:0, basis:null, reticleShow:false };
   var GAZE_ITEMS=[
     {id:'play',     icon:'▶', label:'再生',       tx: 0,    ty: 0   },
     {id:'back',     icon:'⏪', label:'10秒戻る',   tx:-0.46, ty: 0   },
@@ -1165,6 +1178,7 @@
   function gazeReset(){
     gaze.state='idle'; gaze.idleDir=null; gaze.menuDir=null;
     gaze.dwellId=null; gaze.progress=0; gaze.farSince=0; gaze.cooldownUntil=0;
+    gaze.reticleShow=false;
   }
   function dot3(a,b){ return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
   function norm3(a){
@@ -1181,7 +1195,8 @@
     return Math.acos(c);
   }
   function gazeAnchorIdle(b){
-    var c=0.8829, s=0.4695; // 28 degrees below the current front
+    var c=0.8090, s=0.5878; // 36 degrees below the current front: low in
+    // the view, down in the black space under the picture, out of the way
     gaze.idleDir=norm3([
       b.f[0]*c - b.u[0]*s,
       b.f[1]*c - b.u[1]*s,
@@ -1203,6 +1218,10 @@
     return false;
   }
   function gazeOpenMenu(b, now){
+    // The panel is anchored to the gaze direction at this exact instant,
+    // in the video space, and is never re-anchored or eased while open:
+    // from here on the head (and only the reticle with it) moves, the
+    // panel stays where it was opened. No animation on display either.
     gaze.state='menu';
     gaze.menuDir=b.f.slice(); gaze.menuR=b.r.slice(); gaze.menuU=b.u.slice();
     gaze.lastItemGaze=now;
@@ -1242,13 +1261,15 @@
   }
   function gazeUpdateFrame(){
     var now=performance.now();
-    if(!settings.gaze || (!vrMode && !xrSession)){ gaze.dwellId=null; gaze.progress=0; return; }
+    if(!settings.gaze || (!vrMode && !xrSession)){ gaze.dwellId=null; gaze.progress=0; gaze.reticleShow=false; return; }
     var b=gazeBasisNow();
     if(!b) return;
     gaze.basis=b;
     if(gaze.state==='idle'){
       if(!gaze.idleDir) gazeAnchorIdle(b);
       var ang=gazeAngle(b.f, gaze.idleDir);
+      // Reticle shows only while looking toward the menu target.
+      gaze.reticleShow = ang<GAZE_RETICLE_NEAR;
       if(ang>0.9){
         // Target is far off-view (e.g. the user turned around): let it
         // slowly follow to below the new front so it stays reachable.
@@ -1258,6 +1279,8 @@
       var hit=(ang<GAZE_MENU_ANGLE && now>=gaze.cooldownUntil) ? 'menu' : null;
       if(gazeDwellTick(hit, GAZE_MENU_DWELL, now)) gazeOpenMenu(b, now);
     } else {
+      // Menu open: the reticle stays visible for aiming at the items.
+      gaze.reticleShow=true;
       var best=null, bestAng=1e9;
       for(var i=0;i<GAZE_ITEMS.length;i++){
         var a=gazeAngle(b.f, gazeItemDir(GAZE_ITEMS[i]));
@@ -1306,10 +1329,11 @@
       });
       var ret=document.createElement('div');
       ret.className='gaze-reticle';
-      ret.innerHTML='<svg viewBox="0 0 46 46" aria-hidden="true"><circle class="ring-bg" cx="23" cy="23" r="20"></circle><circle class="ring-fg" cx="23" cy="23" r="20" stroke-dasharray="125.7" stroke-dashoffset="125.7"></circle><circle class="dot" cx="23" cy="23" r="3"></circle></svg>';
+      ret.hidden=true; // hidden by default; shown only per gaze.reticleShow
+      ret.innerHTML='<svg viewBox="0 0 46 46" aria-hidden="true"><circle class="ring-bg" cx="23" cy="23" r="20"></circle><circle class="ring-fg" cx="23" cy="23" r="20" stroke-dasharray="125.7" stroke-dashoffset="125.7"></circle><circle class="dot" cx="23" cy="23" r="1.6"></circle></svg>';
       eye.appendChild(ret);
       gazeUi.appendChild(eye);
-      gazeEyes.push({ eye:eye, panel:panel, menuBtn:menuBtn, items:items,
+      gazeEyes.push({ eye:eye, panel:panel, menuBtn:menuBtn, items:items, ret:ret,
                       ring:ret.querySelector('.ring-fg') });
     }
   })();
@@ -1330,6 +1354,7 @@
     gazeEyes.forEach(function(ge){
       var W=ge.eye.clientWidth, H=ge.eye.clientHeight;
       var asp=W/Math.max(1,H);
+      ge.ret.hidden=!gaze.reticleShow;
       ge.ring.style.strokeDashoffset=String(125.7*(1-Math.max(0, Math.min(1, gaze.progress))));
       ge.items.play.icon.textContent=playIcon;
       ge.items.play.label.textContent=playLabel;
@@ -1353,7 +1378,7 @@
   /* ----- gaze overlay: WebXR (GL quads projected per view) ----- */
   var gazeProg=null, gazeALoc=-1, gazeU=null, gazeTex=null;
   var gazeGlState=0; // 0 = untried, 1 = ready, 2 = failed
-  function gazeMakeTex(text, w, h, fontPx){
+  function gazeMakeTex(text, w, h, fontPx, subtle){
     var cv=document.createElement('canvas'); cv.width=w; cv.height=h;
     var ctx=cv.getContext('2d');
     var r=26, x=4, y=4, ww=w-8, hh=h-8;
@@ -1364,9 +1389,11 @@
     ctx.arcTo(x, y+hh, x, y, r);
     ctx.arcTo(x, y, x+ww, y, r);
     ctx.closePath();
-    ctx.fillStyle='rgba(9,13,20,0.93)'; ctx.fill();
-    ctx.lineWidth=5; ctx.strokeStyle='rgba(255,255,255,0.55)'; ctx.stroke();
-    ctx.fillStyle='#ffffff';
+    // The menu target texture is translucent (subtle) so it does not
+    // sit on the video like a solid plate; panel items stay readable.
+    ctx.fillStyle=subtle?'rgba(9,13,20,0.52)':'rgba(9,13,20,0.93)'; ctx.fill();
+    ctx.lineWidth=subtle?3:5; ctx.strokeStyle=subtle?'rgba(255,255,255,0.32)':'rgba(255,255,255,0.55)'; ctx.stroke();
+    ctx.fillStyle=subtle?'rgba(255,255,255,0.85)':'#ffffff';
     ctx.font='700 '+fontPx+'px sans-serif';
     ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillText(text, w/2, h/2+2);
@@ -1419,17 +1446,19 @@
         '  vec2 p = v_uv*2.0 - 1.0;',
         '  float r = length(p);',
         '  vec3 col = vec3(1.0);',
-        '  float alpha = smoothstep(0.17, 0.10, r);',
-        '  float ringMask = smoothstep(0.11, 0.05, abs(r - 0.62));',
+        // Reticle kept tiny, thin and faint on purpose: a bold near
+        // reticle pulls focus and makes the video behind it swim.
+        '  float alpha = smoothstep(0.09, 0.04, r)*0.85;',
+        '  float ringMask = smoothstep(0.055, 0.02, abs(r - 0.65));',
         '  float ang = atan(p.x, p.y);',
         '  float a01 = ang < 0.0 ? ang/6.2831853 + 1.0 : ang/6.2831853;',
         '  if(u_progress > 0.001 && a01 < u_progress){',
         '    col = mix(col, vec3(0.91, 0.70, 0.23), ringMask);',
-        '    alpha = max(alpha, ringMask);',
+        '    alpha = max(alpha, ringMask*0.9);',
         '  } else {',
-        '    alpha = max(alpha, ringMask*0.35);',
+        '    alpha = max(alpha, ringMask*0.28);',
         '  }',
-        '  gl_FragColor = vec4(col, alpha);',
+        '  gl_FragColor = vec4(col, alpha*0.75);',
         '}'
       ].join('\n');
       gazeProg=gl.createProgram();
@@ -1451,7 +1480,7 @@
         tex: gl.getUniformLocation(gazeProg, 'u_tex')
       };
       gazeTex={
-        menu: gazeMakeTex('メニュー', 512, 176, 72),
+        menu: gazeMakeTex('メニュー', 512, 176, 64, true),
         play: gazeMakeTex('▶ 再生', 512, 224, 62),
         pause: gazeMakeTex('⏸ 一時停止', 512, 224, 56),
         back: gazeMakeTex('⏪ 10秒戻る', 512, 224, 56),
@@ -1495,7 +1524,7 @@
     if(gaze.state==='idle'){
       if(gaze.idleDir){
         gazeQuadXR(gazeProject(gaze.idleDir, b, tans[0], tans[1], tans[2], tans[3]),
-          0.14, 0.075, tans, 0, gazeTex.menu, gaze.dwellId==='menu', 0);
+          0.095, 0.05, tans, 0, gazeTex.menu, gaze.dwellId==='menu', 0);
       }
     } else if(gaze.menuDir){
       gazeQuadXR(gazeProject(gaze.menuDir, b, tans[0], tans[1], tans[2], tans[3]),
@@ -1507,9 +1536,13 @@
           0.22, 0.12, tans, 0, tx, gaze.dwellId===it.id, 0);
       }
     }
-    // Reticle last, on top, exactly at the gaze centre.
-    gazeQuadXR(gazeProject(b.f, b, tans[0], tans[1], tans[2], tans[3]),
-      0.045, 0.045, tans, 2, null, false, Math.max(0, Math.min(1, gaze.progress)));
+    // Reticle last, on top, exactly at the gaze centre — but only
+    // while looking toward the menu target or while the menu is open;
+    // it stays hidden the rest of the time.
+    if(gaze.reticleShow){
+      gazeQuadXR(gazeProject(b.f, b, tans[0], tans[1], tans[2], tans[3]),
+        0.026, 0.026, tans, 2, null, false, Math.max(0, Math.min(1, gaze.progress)));
+    }
     gl.disable(gl.BLEND);
   }
 
