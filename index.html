@@ -168,7 +168,7 @@
 
     <section class="works" id="worksSection" hidden aria-label="作品リスト">
       <h2>作品リスト</h2>
-      <p class="note">買った作品だけ、合言葉で開けます。</p>
+      <p class="note">買った作品だけ、シリアルコードで開けます。</p>
       <div id="worksList"></div>
     </section>
 
@@ -1031,7 +1031,7 @@
   }
   function storePass(id, pass){
     try{ localStorage.setItem(PASS_KEY_PREFIX+id, pass); }
-    catch(e){ log('合言葉の保存に失敗しました: '+(e.message||e), 'ng'); }
+    catch(e){ log('シリアルコードの保存に失敗しました: '+(e.message||e), 'ng'); }
   }
   function forgetPass(id){
     try{ localStorage.removeItem(PASS_KEY_PREFIX+id); }catch(e){}
@@ -1061,7 +1061,7 @@
   function tryUnlock(entry, pass, opts){
     opts=opts||{};
     if(!window.crypto || !crypto.subtle){
-      if(!opts.silent) showWorkError(entry, 'このブラウザでは合言葉を開けませんでした');
+      if(!opts.silent) showWorkError(entry, 'このブラウザではシリアルコードで開けませんでした');
       log('作品リスト: WebCryptoが使えないため復号できません', 'ng');
       return Promise.resolve(false);
     }
@@ -1081,7 +1081,7 @@
       entry.openBtn.textContent='開く';
       // A wrong passphrase fails GCM authentication and lands here.
       if(opts.fromSaved) forgetPass(entry.work.id);
-      if(!opts.silent) showWorkError(entry, '合言葉が違います');
+      if(!opts.silent) showWorkError(entry, 'シリアルコードが違います');
       log('作品の解錠に失敗しました: '+entry.work.id+' ('+(err.name||'')+' '+(err.message||err)+')', 'ng');
       return false;
     });
@@ -1107,12 +1107,12 @@
     var input=document.createElement('input');
     input.type='text'; input.autocomplete='off'; input.spellcheck=false;
     input.setAttribute('autocapitalize','off');
-    input.placeholder='合言葉を入力'; input.setAttribute('aria-label','合言葉');
+    input.placeholder='シリアルコードを入力'; input.setAttribute('aria-label','シリアルコード');
     var openBtn=document.createElement('button');
     openBtn.type='button'; openBtn.className='btn primary'; openBtn.textContent='開く';
     row.appendChild(input); row.appendChild(openBtn);
     var hint=document.createElement('p'); hint.className='work-hint';
-    hint.textContent='合言葉は、購入時のメールまたはPDFに書かれています。一度開ければ、この端末では次から入力なしで開けます。';
+    hint.textContent='シリアルコードは、購入時のメール・PDF・カードに記載されています。一度開ければ、この端末では次から入力なしで開けます。';
     var error=document.createElement('p'); error.className='work-error'; error.hidden=true;
     form.appendChild(row); form.appendChild(hint); form.appendChild(error);
     wrap.appendChild(main); wrap.appendChild(form);
@@ -1128,7 +1128,7 @@
     });
     function submit(){
       var pass=input.value;
-      if(!pass){ showWorkError(entry, '合言葉を入力してください'); return; }
+      if(!pass){ showWorkError(entry, 'シリアルコードを入力してください'); return; }
       error.hidden=true;
       tryUnlock(entry, pass, {load:true});
     }
