@@ -184,13 +184,19 @@
   document.getElementById('logCloseBtn').addEventListener('click', function(){ setLogOpen(false); });
 
   /* ---------- state ---------- */
-  var yaw=0, pitch=0;               // radians
-  var distortion=false, swapEyes=false, gyroEnabled=false;
+  var yaw=0, pitch=0;               // drag look-around offsets (radians)
+  var distortion=false, swapEyes=false, gyroEnabled=false, gyroActive=false;
+  var devAlpha=0, devBeta=0, devGamma=0;  // latest deviceorientation sample (degrees)
   var texOkLogged=false, texNgLogged=false;
 
   function updateStatus(){
-    stYaw.textContent = Math.round(yaw*180/Math.PI)+'°';
-    stPitch.textContent = Math.round(pitch*180/Math.PI)+'°';
+    var m=buildRotationMatrix();
+    // forward = R * (0,0,-1) = -(3rd column) of the column-major matrix
+    var fx=-m[6], fy=-m[7], fz=-m[8];
+    var dispYaw=Math.atan2(fx, -fz);
+    var dispPitch=Math.asin(Math.max(-1, Math.min(1, fy)));
+    stYaw.textContent = Math.round(dispYaw*180/Math.PI)+'°';
+    stPitch.textContent = Math.round(dispPitch*180/Math.PI)+'°';
     stDist.textContent = distortion?'ON':'OFF';
     stSwap.textContent = swapEyes?'入替中':'通常';
     document.getElementById('labelL').textContent = swapEyes?'R':'L';
@@ -404,16 +410,70 @@
     canvas.addEventListener(n, function(){ dragging=false; });
   });
 
+  /* ---------- orientation math (quaternions) ----------
+     Same conversion as three.js DeviceOrientationControls:
+     device Euler(beta, alpha, -gamma, 'YXZ') -> * q1 (-90deg about X, so the
+     camera looks out the back of the device) -> * q0 (screen orientation).
+     The old alpha/beta->yaw/pitch extraction broke in landscape because the
+     device axes no longer line up with the screen axes; the quaternion path
+     is correct in portrait and landscape alike. */
+  function qAxisAngle(ax, ay, az, angle){
+    var s=Math.sin(angle/2);
+    return [ax*s, ay*s, az*s, Math.cos(angle/2)];
+  }
+  function qMul(a, b){
+    return [
+      a[3]*b[0] + a[0]*b[3] + a[1]*b[2] - a[2]*b[1],
+      a[3]*b[1] - a[0]*b[2] + a[1]*b[3] + a[2]*b[0],
+      a[3]*b[2] + a[0]*b[1] - a[1]*b[0] + a[2]*b[3],
+      a[3]*b[3] - a[0]*b[0] - a[1]*b[1] - a[2]*b[2]
+    ];
+  }
+  function qToMat3ColumnMajor(q){
+    var x=q[0], y=q[1], z=q[2], w=q[3];
+    var x2=x+x, y2=y+y, z2=z+z;
+    var xx=x*x2, xy=x*y2, xz=x*z2;
+    var yy=y*y2, yz=y*z2, zz=z*z2;
+    var wx=w*x2, wy=w*y2, wz=w*z2;
+    return new Float32Array([
+      1-(yy+zz), xy+wz,     xz-wy,
+      xy-wz,     1-(xx+zz), yz+wx,
+      xz+wy,     yz-wx,     1-(xx+yy)
+    ]);
+  }
+  function screenAngleDeg(){
+    if(window.screen && screen.orientation && typeof screen.orientation.angle==='number') return screen.orientation.angle;
+    if(typeof window.orientation==='number') return window.orientation;
+    return 0;
+  }
+  var Q1=[-Math.SQRT1_2, 0, 0, Math.SQRT1_2]; // -90 deg about X (device -> camera)
+  function buildRotationMatrix(){
+    var d=Math.PI/180;
+    var q;
+    if(gyroActive){
+      q=qMul(qAxisAngle(0,1,0, devAlpha*d), qAxisAngle(1,0,0, devBeta*d)); // Ry(alpha) * Rx(beta)
+      q=qMul(q, qAxisAngle(0,0,1, -devGamma*d));                            // * Rz(-gamma)
+      q=qMul(q, Q1);                                                        // * q1
+      q=qMul(q, qAxisAngle(0,0,1, -screenAngleDeg()*d));                    // * q0 (screen orientation)
+    } else {
+      q=[0,0,0,1];
+    }
+    // Drag look-around is kept as an offset on top of the gyro attitude
+    // (with no gyro it is the whole rotation, exactly as before: Ry(yaw)*Rx(pitch)).
+    var qDrag=qMul(qAxisAngle(0,1,0, yaw), qAxisAngle(1,0,0, pitch));
+    q=qMul(qDrag, q);
+    return qToMat3ColumnMajor(q);
+  }
+
   /* ---------- gyro ---------- */
   var gyroLogged=false;
   function onOrientation(e){
     if(e.alpha===null && e.beta===null && e.gamma===null) return;
-    if(!gyroLogged){ gyroLogged=true; log('deviceorientation 受信開始: alpha='+e.alpha+' beta='+e.beta+' gamma='+e.gamma, 'ok'); }
-    var d=Math.PI/180;
-    // Approximate mapping for a phone held up / in a holder:
-    // alpha (compass heading) -> yaw, beta (front-back tilt, 90 = upright) -> pitch.
-    if(e.alpha!==null) yaw = -e.alpha*d;
-    if(e.beta!==null) pitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, (e.beta-90)*d));
+    if(e.alpha!==null) devAlpha=e.alpha;
+    if(e.beta!==null) devBeta=e.beta;
+    if(e.gamma!==null) devGamma=e.gamma;
+    gyroActive=true;
+    if(!gyroLogged){ gyroLogged=true; log('deviceorientation 受信開始: alpha='+e.alpha+' beta='+e.beta+' gamma='+e.gamma+' / 画面向き='+screenAngleDeg()+'°（四元数方式）', 'ok'); }
     updateStatus();
   }
   function enableGyro(){
@@ -453,26 +513,25 @@
     'precision highp float;',
     'varying vec2 v_pos;',
     'uniform sampler2D u_tex;',
-    'uniform float u_yaw;',
-    'uniform float u_pitch;',
+    'uniform mat3 u_rot;',
     'uniform float u_eye;',      // 0 = left half, 1 = right half
     'uniform float u_aspect;',   // per-eye viewport aspect (w/h)
     'uniform float u_distort;',  // 0 / 1
     'const float PI = 3.141592653589793;',
-    'vec3 rotX(vec3 d, float a){ float c=cos(a), s=sin(a); return vec3(d.x, c*d.y - s*d.z, s*d.y + c*d.z); }',
-    'vec3 rotY(vec3 d, float a){ float c=cos(a), s=sin(a); return vec3(c*d.x + s*d.z, d.y, -s*d.x + c*d.z); }',
     'void main(){',
     '  vec2 p = v_pos;',
     '  if(u_distort > 0.5){',
+    // Gentle pincushion correction only: the full frame stays visible (no
+    // circular cut-out, no shrink). A slight overall magnification of the
+    // image (sample scale < 1) keeps the corners filled, and the
+    // coefficients are deliberately weak.
     '    float r2 = dot(p,p);',
-    // Cardboard-style barrel compensation (approximate, K1=0.22 K2=0.24)
-    '    float f = 1.0 + 0.22*r2 + 0.24*r2*r2;',
+    '    float f = 0.96 * (1.0 + 0.10*r2 + 0.02*r2*r2);',
     '    p = p * f;',
-    '    if(abs(p.x) > 1.35 || abs(p.y) > 1.35){ gl_FragColor = vec4(0.0,0.0,0.0,1.0); return; }',
     '  }',
     // 90 deg vertical FOV -> tan(45deg) = 1.0 ; forward = -Z
     '  vec3 dirCam = normalize(vec3(p.x * u_aspect, p.y, -1.0));',
-    '  vec3 dir = rotY(rotX(dirCam, u_pitch), u_yaw);',
+    '  vec3 dir = u_rot * dirCam;',
     '  if(dir.z > 0.0){ gl_FragColor = vec4(0.0,0.0,0.0,1.0); return; }',
     '  float yawAngle = atan(dir.x, -dir.z);',
     '  float pitchAngle = asin(clamp(dir.y, -1.0, 1.0));',
@@ -505,8 +564,7 @@
   gl.enableVertexAttribArray(loc);
   gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
 
-  var uYaw=gl.getUniformLocation(prog,'u_yaw'),
-      uPitch=gl.getUniformLocation(prog,'u_pitch'),
+  var uRot=gl.getUniformLocation(prog,'u_rot'),
       uEye=gl.getUniformLocation(prog,'u_eye'),
       uAspect=gl.getUniformLocation(prog,'u_aspect'),
       uDistort=gl.getUniformLocation(prog,'u_distort');
@@ -554,8 +612,7 @@
     }
 
     gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.uniform1f(uYaw, yaw);
-    gl.uniform1f(uPitch, pitch);
+    gl.uniformMatrix3fv(uRot, false, buildRotationMatrix());
     gl.uniform1f(uDistort, distortion?1:0);
     gl.uniform1f(uAspect, (halfW/Math.max(1,H)));
 
