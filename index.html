@@ -13,9 +13,9 @@
 <style>
   :root{
     color-scheme: dark;
-    --bg:#0b0e13; --panel:rgba(5,7,10,.85); --panel2:rgba(18,22,31,.85); --line:#262d3d;
-    --text:#e8ecf3; --muted:#9aa6b8; --accent:#e8b33a; --accent-text:#171106;
-    --btn:rgba(27,34,48,.92); --btn-on:#2a2110;
+    --panel:rgba(5,7,10,.88); --panel2:rgba(14,18,26,.92); --line:#2a3244;
+    --text:#eef1f7; --muted:#a7b1c2; --accent:#e8b33a; --accent-text:#171106;
+    --btn:rgba(30,38,54,.95); --btn-on:#2a2110;
     --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
   *{box-sizing:border-box}
@@ -24,85 +24,88 @@
   button,input{font:inherit}
   button{cursor:pointer}
   button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  [hidden]{display:none !important}
 
   /* ---------- full-screen stage ---------- */
   .stage{position:fixed;inset:0;width:100vw;height:100dvh;background:#000;z-index:0}
   canvas{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
   canvas:active{cursor:grabbing}
-  .divider{position:absolute;top:0;bottom:0;left:50%;width:1px;background:rgba(255,255,255,.22);pointer-events:none}
-  .eye-label{position:absolute;top:8px;font-family:var(--mono);font-size:11px;color:rgba(255,255,255,.65);background:rgba(0,0,0,.45);padding:2px 7px;border-radius:20px;pointer-events:none}
+  .divider{position:absolute;top:0;bottom:0;left:50%;width:1px;background:rgba(255,255,255,.22);pointer-events:none;display:none}
+  body.vr-on .divider{display:block}
+  .eye-label{position:absolute;top:calc(8px + env(safe-area-inset-top));font-family:var(--mono);font-size:11px;color:rgba(255,255,255,.6);background:rgba(0,0,0,.45);padding:2px 7px;border-radius:20px;pointer-events:none;display:none}
+  body.vr-on .eye-label{display:block}
   .eye-label.l{left:10px}.eye-label.r{right:10px}
-  .hint{position:absolute;left:50%;bottom:calc(34px + env(safe-area-inset-bottom));transform:translateX(-50%);font-size:12px;color:rgba(255,255,255,.75);background:rgba(0,0,0,.55);padding:5px 10px;border-radius:20px;pointer-events:none;white-space:nowrap}
-  /* ---------- VR fullscreen in-stage overlays ---------- */
-  .rotate-hint{position:absolute;inset:0;z-index:3;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.6);pointer-events:none;text-align:center}
+  .drag-hint{position:absolute;left:50%;top:38%;transform:translateX(-50%);font-size:12.5px;color:rgba(255,255,255,.8);background:rgba(0,0,0,.5);padding:6px 12px;border-radius:20px;pointer-events:none;white-space:nowrap}
+  body.vr-on .drag-hint{display:none}
+  .rotate-hint{position:absolute;inset:0;z-index:3;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.55);pointer-events:none;text-align:center}
   .rotate-hint span{font-size:15px;font-weight:700;line-height:1.7;color:#fff;background:rgba(0,0,0,.45);padding:12px 18px;border-radius:10px}
-  @media (orientation:portrait){
-    body.fs-on .rotate-hint{display:flex}
-  }
-  .fs-ui{position:absolute;left:50%;top:calc(14px + env(safe-area-inset-top));transform:translateX(-50%);z-index:4;display:none}
-  body.fs-on .fs-ui.show{display:block}
-  .fs-ui .btn{background:rgba(10,13,19,.72);border-color:rgba(255,255,255,.4);color:#fff;padding:9px 16px;font-size:13px}
+  @media (orientation:portrait){ body.vr-on .rotate-hint{display:flex} }
   video{position:absolute;width:2px;height:2px;opacity:0;pointer-events:none;left:0;top:0}
 
-  /* ---------- overlay toolbar (single row, horizontally scrollable) ---------- */
-  .toolbar{position:fixed;top:0;left:0;right:0;z-index:10;padding:calc(6px + env(safe-area-inset-top)) calc(8px + env(safe-area-inset-right)) 6px calc(8px + env(safe-area-inset-left));display:flex;flex-wrap:nowrap;gap:6px;align-items:center;border-bottom:1px solid var(--line);background:var(--panel2);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none}
-  .toolbar::-webkit-scrollbar{display:none}
-  .urlrow{display:flex;gap:6px;flex:0 0 auto;align-items:center}
-  .urlrow input{width:min(300px,52vw);min-width:120px;background:rgba(10,13,19,.92);border:1px solid var(--line);color:var(--text);border-radius:7px;padding:6px 8px;font-family:var(--mono);font-size:11.5px}
-  .urlrow input::placeholder{color:var(--muted);font-family:system-ui,sans-serif;font-size:12px}
-  .btn{appearance:none;border:1px solid var(--line);background:var(--btn);color:var(--text);border-radius:7px;padding:6px 10px;font-size:12.5px;font-weight:600;white-space:nowrap;flex:0 0 auto}
+  /* ---------- shared bits ---------- */
+  .btn{appearance:none;border:1px solid var(--line);background:var(--btn);color:var(--text);border-radius:9px;padding:9px 14px;font-size:14px;font-weight:600;white-space:nowrap}
   .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
-  .btn[aria-pressed="true"]{background:var(--btn-on);border-color:var(--accent);color:var(--accent)}
-  .btn.ghost{background:rgba(27,34,48,.55)}
   .btn:disabled{opacity:.55;cursor:default}
+  .icon-btn{appearance:none;border:1px solid var(--line);background:var(--btn);color:var(--text);border-radius:50%;width:46px;height:46px;font-size:17px;line-height:1;padding:0;flex:0 0 auto}
+  input[type="range"]{accent-color:var(--accent);min-width:0}
+  .seek{flex:1 1 auto}
+  .time{font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap;flex:0 0 auto}
 
-  /* ---------- load status line (always visible, under the toolbar) ---------- */
-  .loadstatus{position:fixed;top:calc(54px + env(safe-area-inset-top));left:calc(8px + env(safe-area-inset-left));z-index:6;font-family:var(--mono);font-size:11.5px;color:var(--text);background:rgba(0,0,0,.62);padding:4px 9px;border-radius:6px;pointer-events:none;max-width:calc(100vw - 16px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* ---------- start screen ---------- */
+  .start-ui{position:fixed;inset:0;z-index:10;display:flex;flex-direction:column;justify-content:space-between;pointer-events:none}
+  body.vr-on .start-ui{display:none}
+  .start-head{padding:calc(14px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 0 calc(16px + env(safe-area-inset-left));pointer-events:none}
+  .start-head h1{margin:0;font-size:clamp(24px,6.5vw,40px);font-weight:800;line-height:1.25;letter-spacing:.01em;text-shadow:0 2px 14px rgba(0,0,0,.85);word-break:break-word}
+  .loadstatus{display:inline-block;margin-top:10px;font-size:13px;color:var(--text);background:rgba(0,0,0,.62);padding:5px 11px;border-radius:20px;max-width:100%}
   .loadstatus.ok{color:#7ee2a0}
   .loadstatus.ng{color:#ff9d9d}
   .loadstatus.busy{color:var(--accent)}
-  body.ui-off .loadstatus{display:none}
-
-  /* ---------- add-to-home-screen hint (browser mode only, dismissible) ---------- */
-  .sa-hint{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(72px + env(safe-area-inset-bottom));z-index:8;display:none;align-items:center;gap:8px;background:rgba(10,13,19,.88);border:1px solid var(--line);color:var(--text);font-size:12px;line-height:1.45;padding:7px 8px 7px 13px;border-radius:20px;max-width:calc(100vw - 24px);box-shadow:0 4px 14px rgba(0,0,0,.45)}
-  .sa-hint.show{display:flex}
-  .sa-hint button{appearance:none;border:1px solid var(--line);background:var(--btn);color:var(--muted);border-radius:50%;width:22px;height:22px;line-height:1;font-size:14px;padding:0;flex:0 0 auto}
-  body.ui-off .sa-hint{display:none}
-  body.fs-on .sa-hint{display:none}
-
-  /* ---------- status overlaid on the canvas, bottom-left ---------- */
-  .statusbar{position:fixed;left:calc(8px + env(safe-area-inset-left));bottom:calc(8px + env(safe-area-inset-bottom));z-index:5;font-family:var(--mono);font-size:10.5px;color:rgba(232,236,243,.8);background:rgba(0,0,0,.45);padding:3px 8px;border-radius:6px;display:flex;flex-wrap:nowrap;gap:3px 12px;pointer-events:none;max-width:calc(100vw - 130px);overflow:hidden;white-space:nowrap}
-  .statusbar b{color:#fff;font-weight:600}
-
-  /* ---------- small floating button to bring the UI back ---------- */
-  .ui-show{position:fixed;right:calc(10px + env(safe-area-inset-right));bottom:calc(10px + env(safe-area-inset-bottom));z-index:20;appearance:none;border:1px solid rgba(255,255,255,.35);background:rgba(10,13,19,.45);color:rgba(255,255,255,.85);border-radius:20px;padding:7px 14px;font-size:12px;font-weight:600;display:none}
-  body.ui-off .toolbar{display:none}
-  body.ui-off .logwrap{display:none}
-  body.ui-off .statusbar{display:none}
-  body.ui-off .ui-show{display:block}
-  body.ui-off .hint{display:none}
-
-  /* ---------- overlay diagnostic log panel ---------- */
-  .logwrap{position:fixed;left:0;right:0;bottom:0;z-index:10;border-top:1px solid var(--line);background:var(--panel);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:none;flex-direction:column;height:38dvh;min-height:140px;max-height:70dvh;padding-bottom:env(safe-area-inset-bottom)}
-  .logwrap.open{display:flex}
-  .loghead{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border-bottom:1px solid var(--line)}
-  .loghead span{font-size:12px;font-weight:700;letter-spacing:.04em}
-  .loghead .loghead-btns{display:flex;gap:6px}
-  .loghead button{background:none;border:1px solid var(--line);color:var(--muted);border-radius:6px;padding:3px 9px;font-size:12px}
-  #log{flex:1;overflow-y:auto;padding:8px 10px;font-family:var(--mono);font-size:11.5px;line-height:1.65;word-break:break-all}
+  .start-bottom{pointer-events:auto;background:var(--panel2);border-top:1px solid var(--line);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);padding:12px calc(14px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left));display:flex;flex-direction:column;gap:11px;max-height:82dvh;overflow-y:auto}
+  .transport{display:flex;align-items:center;gap:11px}
+  .vr-big{appearance:none;border:1px solid var(--accent);background:var(--accent);color:var(--accent-text);border-radius:12px;padding:15px 16px;font-size:18px;font-weight:800;width:100%;letter-spacing:.02em}
+  .vr-big small{display:block;font-size:12px;font-weight:600;opacity:.75;margin-top:2px}
+  .subrow{display:flex;gap:8px}
+  .subrow .btn{flex:1;padding:8px 10px;font-size:13px;color:var(--muted)}
+  .subrow .btn[aria-expanded="true"]{color:var(--accent);border-color:var(--accent)}
+  .panel{border-top:1px solid var(--line);padding-top:11px;display:flex;flex-direction:column;gap:12px}
+  .set-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .set-row .set-label{font-size:14px;font-weight:600}
+  .set-row .set-note{font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.5}
+  .seg{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;flex:0 0 auto}
+  .seg button{appearance:none;border:0;background:transparent;color:var(--muted);padding:8px 12px;font-size:13px;font-weight:600}
+  .seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-text)}
+  .set-row input[type="range"]{flex:1 1 auto;max-width:55%}
+  .switch{appearance:none;border:1px solid var(--line);background:var(--btn);color:var(--muted);border-radius:20px;padding:7px 14px;font-size:13px;font-weight:700;flex:0 0 auto;min-width:64px}
+  .switch[aria-pressed="true"]{background:var(--btn-on);border-color:var(--accent);color:var(--accent)}
+  .urlrow{display:flex;gap:8px;align-items:center}
+  .urlrow input{flex:1 1 auto;min-width:0;background:rgba(10,13,19,.92);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font-family:var(--mono);font-size:12px}
+  .urlrow input::placeholder{color:var(--muted);font-family:system-ui,sans-serif;font-size:12.5px}
+  .note{font-size:12.5px;color:var(--muted);line-height:1.6;margin:0}
+  .loghead{display:flex;align-items:center;justify-content:space-between}
+  .loghead span{font-size:12.5px;font-weight:700}
+  .loghead button{background:none;border:1px solid var(--line);color:var(--muted);border-radius:6px;padding:3px 10px;font-size:12px}
+  #log{overflow-y:auto;max-height:26dvh;padding:8px 10px;font-family:var(--mono);font-size:11px;line-height:1.65;word-break:break-all;background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:8px}
   #log .t{color:#6f7d92}
   #log .ok{color:#7ee2a0}
   #log .ng{color:#ff8a8a}
   #log .ev{color:#a9c6ff}
 
-  @media (max-width:560px){
-    .hint{display:none}
-  }
+  /* ---------- VR mode overlay ---------- */
+  .vr-ui{position:absolute;inset:0;z-index:4;pointer-events:none;display:none}
+  .vr-ui.show{display:block;animation:vrFadeIn .25s ease}
+  @keyframes vrFadeIn{from{opacity:0}to{opacity:1}}
+  .vr-top{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:calc(10px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 10px calc(12px + env(safe-area-inset-left));background:linear-gradient(rgba(0,0,0,.55),transparent)}
+  .vr-top .vr-title{font-size:13.5px;font-weight:700;color:#fff;text-shadow:0 1px 6px rgba(0,0,0,.8);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .vr-bottom{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:11px;padding:10px calc(12px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));background:linear-gradient(transparent,rgba(0,0,0,.6))}
+  .vr-ui .btn,.vr-ui .icon-btn{pointer-events:auto;background:rgba(10,13,19,.78);border-color:rgba(255,255,255,.35);color:#fff}
+  .vr-ui .seek{pointer-events:auto}
+  .vr-ui .time{color:rgba(255,255,255,.85)}
+
   @media (orientation:landscape) and (max-height:480px){
-    .toolbar{gap:5px;padding-top:calc(4px + env(safe-area-inset-top));padding-bottom:4px}
-    .btn{padding:5px 9px;font-size:12px}
-    .urlrow input{padding:5px 8px}
-    .logwrap{height:55dvh}
+    .start-head h1{font-size:22px}
+    .start-bottom{gap:8px;padding-top:9px}
+    .vr-big{padding:11px 14px;font-size:16px}
+    .icon-btn{width:40px;height:40px}
   }
 </style>
 </head>
@@ -113,56 +116,92 @@
   <div class="divider"></div>
   <span class="eye-label l" id="labelL">L</span>
   <span class="eye-label r" id="labelR">R</span>
-  <div class="hint">ドラッグで見回し</div>
-  <div class="rotate-hint" id="rotateHint"><span>横画面にしてください<br>スマホを横向きにすると全画面で見られます</span></div>
-  <div class="fs-ui" id="fsUi">
-    <button class="btn" id="fsExitBtn" type="button">全画面を終了</button>
+  <div class="drag-hint" id="dragHint">ドラッグで見回せます</div>
+  <div class="rotate-hint" id="rotateHint"><span>横画面にしてください<br>スマホを横向きにすると見やすくなります</span></div>
+
+  <div class="vr-ui" id="vrUi">
+    <div class="vr-top">
+      <span class="vr-title" id="vrTitle">VR180 Viewer</span>
+      <button class="btn" id="vrExitBtn" type="button">VRを終了</button>
+    </div>
+    <div class="vr-bottom">
+      <button class="icon-btn" id="vrPlayBtn" type="button" aria-label="再生・一時停止">▶</button>
+      <input class="seek" id="vrSeek" type="range" min="0" max="1000" step="1" value="0" aria-label="再生位置">
+      <span class="time" id="vrTime">0:00 / 0:00</span>
+      <button class="btn" id="recenterBtn" type="button">正面に戻す</button>
+    </div>
   </div>
+
   <video id="video" crossorigin="anonymous" playsinline loop preload="auto" muted></video>
 </div>
 
-<div class="toolbar">
-  <div class="urlrow">
-    <input id="urlInput" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="Dropboxの動画URL（?u= でも指定可）" aria-label="動画URL">
-    <button class="btn" id="loadBtn" type="button">読込</button>
+<div class="start-ui" id="startUi">
+  <div class="start-head">
+    <h1 id="titleText">VR180 Viewer</h1>
+    <div><span class="loadstatus" id="loadStatus" role="status">動画を読み込んでいます…</span></div>
   </div>
-  <button class="btn primary" id="playBtn" type="button">▶ 再生</button>
-  <button class="btn primary" id="vrFsBtn" type="button">VR全画面</button>
-  <button class="btn primary" id="fsBtn" type="button">動画全画面(生)</button>
-  <button class="btn" id="gyroBtn" type="button">ジャイロ許可</button>
-  <button class="btn" id="distortBtn" type="button" aria-pressed="false">歪み補正 OFF</button>
-  <button class="btn" id="swapBtn" type="button" aria-pressed="false">左右入替</button>
-  <button class="btn ghost" id="logToggleBtn" type="button" aria-expanded="false" aria-controls="logPanel">ログ表示</button>
-  <button class="btn ghost" id="uiHideBtn" type="button">UI隠す</button>
-</div>
 
-<div class="loadstatus" id="loadStatus" role="status">動画： 未読み込み（URLを貼って「読込」を押してください）</div>
-
-<div class="sa-hint" id="saHint" role="note">
-  <span>全画面で見るには：共有ボタン →「ホーム画面に追加」</span>
-  <button id="saHintClose" type="button" aria-label="案内を閉じる">×</button>
-</div>
-
-<div class="statusbar" aria-live="polite">
-  <span>yaw <b id="stYaw">0°</b></span>
-  <span>pitch <b id="stPitch">0°</b></span>
-  <span>歪み補正 <b id="stDist">OFF</b></span>
-  <span>左右 <b id="stSwap">通常</b></span>
-  <span>texImage2D <b id="stTex">未確認</b></span>
-</div>
-
-<button class="ui-show" id="uiShowBtn" type="button" aria-label="UIを表示する">UI表示</button>
-
-<section class="logwrap" id="logPanel" aria-label="診断ログ">
-  <div class="loghead">
-    <span>診断ログ</span>
-    <div class="loghead-btns">
-      <button id="clearLog" type="button">クリア</button>
-      <button id="logCloseBtn" type="button">閉じる</button>
+  <div class="start-bottom">
+    <div class="transport">
+      <button class="icon-btn" id="playBtn" type="button" aria-label="再生・一時停止">▶</button>
+      <input class="seek" id="seek" type="range" min="0" max="1000" step="1" value="0" aria-label="再生位置">
+      <span class="time" id="timeText">0:00 / 0:00</span>
     </div>
+    <button class="vr-big" id="vrBtn" type="button">VRで見る<small>ゴーグルで見る場合はこちら</small></button>
+    <div class="subrow">
+      <button class="btn" id="settingsBtn" type="button" aria-expanded="false" aria-controls="settingsPanel">設定</button>
+      <button class="btn" id="detailsBtn" type="button" aria-expanded="false" aria-controls="detailsPanel">詳細・その他の操作</button>
+    </div>
+
+    <section class="panel" id="settingsPanel" hidden aria-label="設定">
+      <div class="set-row">
+        <div>
+          <div class="set-label">歪み補正</div>
+          <div class="set-note">レンズのゆがみを直します。「おすすめ」が標準です</div>
+        </div>
+        <div class="seg" role="group" aria-label="歪み補正">
+          <button type="button" data-dist="0" aria-pressed="false">オフ</button>
+          <button type="button" data-dist="1" aria-pressed="true">おすすめ</button>
+          <button type="button" data-dist="2" aria-pressed="false">強め</button>
+        </div>
+      </div>
+      <div class="set-row">
+        <div>
+          <div class="set-label">眼幅</div>
+          <div class="set-note">左右の映像の間隔を調整します</div>
+        </div>
+        <input type="range" id="ipdRange" min="-30" max="30" step="1" value="0" aria-label="眼幅">
+      </div>
+      <div class="set-row">
+        <div>
+          <div class="set-label">ジャイロ</div>
+          <div class="set-note">スマホの動きに合わせて映像が動きます</div>
+        </div>
+        <button class="switch" id="gyroSetBtn" type="button" aria-pressed="true">ON</button>
+      </div>
+      <div class="set-row">
+        <div>
+          <div class="set-label">左右入替</div>
+          <div class="set-note">映像が裏返って見える場合に使います</div>
+        </div>
+        <button class="switch" id="swapSetBtn" type="button" aria-pressed="false">OFF</button>
+      </div>
+    </section>
+
+    <section class="panel" id="detailsPanel" hidden aria-label="詳細">
+      <div class="urlrow">
+        <input id="urlInput" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="動画リンクを貼り付け" aria-label="動画URL">
+        <button class="btn" id="loadBtn" type="button">読込</button>
+      </div>
+      <p class="note" id="saHint">全画面で見るには：共有ボタン →「ホーム画面に追加」をして、ホーム画面のアイコンから開いてください。</p>
+      <div class="loghead">
+        <span>診断ログ</span>
+        <button id="clearLog" type="button">クリア</button>
+      </div>
+      <div id="log" role="log" aria-live="polite"></div>
+    </section>
   </div>
-  <div id="log" role="log" aria-live="polite"></div>
-</section>
+</div>
 
 <script>
 (function(){
@@ -171,8 +210,7 @@
   var urlInput = document.getElementById('urlInput');
   var video = document.getElementById('video');
   var canvas = document.getElementById('glcanvas');
-  var stYaw=document.getElementById('stYaw'), stPitch=document.getElementById('stPitch'),
-      stDist=document.getElementById('stDist'), stSwap=document.getElementById('stSwap'), stTex=document.getElementById('stTex');
+  var stageEl = document.getElementById('stage');
 
   function ts(){
     var d=new Date(), p=function(n,l){return String(n).padStart(l||2,'0');};
@@ -188,53 +226,88 @@
   }
   document.getElementById('clearLog').addEventListener('click', function(){ logEl.innerHTML=''; log('ログをクリアしました'); });
 
-  /* ---------- overlay UI show / hide ---------- */
-  document.getElementById('uiHideBtn').addEventListener('click', function(){
-    document.body.classList.add('ui-off');
-    log('UIを隠しました（右下の「UI表示」で戻ります）');
-  });
-  document.getElementById('uiShowBtn').addEventListener('click', function(){
-    document.body.classList.remove('ui-off');
-    log('UIを表示しました');
-  });
-
-  /* ---------- log panel toggle (default: closed) ---------- */
-  var logPanel=document.getElementById('logPanel');
-  var logToggleBtn=document.getElementById('logToggleBtn');
-  function setLogOpen(open){
-    logPanel.classList.toggle('open', open);
-    logToggleBtn.textContent = open?'ログ隠す':'ログ表示';
-    logToggleBtn.setAttribute('aria-expanded', String(open));
+  /* ---------- settings (persisted) ---------- */
+  var SETTINGS_KEY='vr180-viewer-settings-v1';
+  var settings={ dist:1, ipd:0, gyro:true, swap:false };
+  try{
+    var saved=JSON.parse(localStorage.getItem(SETTINGS_KEY)||'null');
+    if(saved){
+      if(saved.dist===0||saved.dist===1||saved.dist===2) settings.dist=saved.dist;
+      if(typeof saved.ipd==='number' && isFinite(saved.ipd)) settings.ipd=Math.max(-30, Math.min(30, saved.ipd));
+      if(typeof saved.gyro==='boolean') settings.gyro=saved.gyro;
+      if(typeof saved.swap==='boolean') settings.swap=saved.swap;
+    }
+  }catch(e){ log('設定の読み込みに失敗しました（初期値で続けます）: '+(e.message||e), 'ng'); }
+  function saveSettings(){
+    try{ localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); }
+    catch(e){ log('設定の保存に失敗しました: '+(e.message||e), 'ng'); }
   }
-  logToggleBtn.addEventListener('click', function(){
-    var open=!logPanel.classList.contains('open');
-    setLogOpen(open);
-    log('診断ログパネル: '+(open?'開きました':'閉じました'));
-  });
-  document.getElementById('logCloseBtn').addEventListener('click', function(){ setLogOpen(false); });
 
   /* ---------- state ---------- */
   var yaw=0, pitch=0;               // drag look-around offsets (radians)
-  var distortion=false, swapEyes=false, gyroEnabled=false, gyroActive=false;
+  var vrMode=false;
+  var gyroEnabled=false, gyroActive=false;
   var devAlpha=0, devBeta=0, devGamma=0;  // latest deviceorientation sample (degrees)
+  var recenterMat=new Float32Array([1,0,0, 0,1,0, 0,0,1]); // recenter offset (world frame)
   var texOkLogged=false, texNgLogged=false;
 
-  function updateStatus(){
-    var m=buildRotationMatrix();
-    // forward = R * (0,0,-1) = -(3rd column) of the column-major matrix
-    var fx=-m[6], fy=-m[7], fz=-m[8];
-    var dispYaw=Math.atan2(fx, -fz);
-    var dispPitch=Math.asin(Math.max(-1, Math.min(1, fy)));
-    stYaw.textContent = Math.round(dispYaw*180/Math.PI)+'°';
-    stPitch.textContent = Math.round(dispPitch*180/Math.PI)+'°';
-    stDist.textContent = distortion?'ON':'OFF';
-    stSwap.textContent = swapEyes?'入替中':'通常';
-    document.getElementById('labelL').textContent = swapEyes?'R':'L';
-    document.getElementById('labelR').textContent = swapEyes?'L':'R';
+  /* ---------- collapsible panels ---------- */
+  function wirePanel(btnId, panelId){
+    var btn=document.getElementById(btnId), panel=document.getElementById(panelId);
+    btn.addEventListener('click', function(){
+      var open=panel.hidden;
+      panel.hidden=!open;
+      btn.setAttribute('aria-expanded', String(open));
+    });
+    return panel;
+  }
+  wirePanel('settingsBtn', 'settingsPanel');
+  var detailsPanel=wirePanel('detailsBtn', 'detailsPanel');
+  var detailsBtn=document.getElementById('detailsBtn');
+  function openDetails(){
+    if(detailsPanel.hidden){ detailsPanel.hidden=false; detailsBtn.setAttribute('aria-expanded','true'); }
   }
 
-  /* ---------- visible load status (the log panel is hidden by default,
-       so load results must also appear here, on screen) ---------- */
+  /* ---------- settings UI ---------- */
+  var segBtns=Array.prototype.slice.call(document.querySelectorAll('.seg button[data-dist]'));
+  var ipdRange=document.getElementById('ipdRange');
+  var gyroSetBtn=document.getElementById('gyroSetBtn');
+  var swapSetBtn=document.getElementById('swapSetBtn');
+  function applySettingsToUI(){
+    segBtns.forEach(function(b){ b.setAttribute('aria-pressed', String(Number(b.getAttribute('data-dist'))===settings.dist)); });
+    ipdRange.value=String(settings.ipd);
+    gyroSetBtn.setAttribute('aria-pressed', String(settings.gyro));
+    gyroSetBtn.textContent=settings.gyro?'ON':'OFF';
+    swapSetBtn.setAttribute('aria-pressed', String(settings.swap));
+    swapSetBtn.textContent=settings.swap?'ON':'OFF';
+    document.getElementById('labelL').textContent=settings.swap?'R':'L';
+    document.getElementById('labelR').textContent=settings.swap?'L':'R';
+  }
+  segBtns.forEach(function(b){
+    b.addEventListener('click', function(){
+      settings.dist=Number(b.getAttribute('data-dist'));
+      saveSettings(); applySettingsToUI();
+      log('設定: 歪み補正 = '+['オフ','おすすめ','強め'][settings.dist]);
+    });
+  });
+  ipdRange.addEventListener('input', function(){
+    settings.ipd=Number(ipdRange.value);
+    saveSettings();
+  });
+  gyroSetBtn.addEventListener('click', function(){
+    settings.gyro=!settings.gyro;
+    saveSettings(); applySettingsToUI();
+    log('設定: ジャイロ初期値 = '+(settings.gyro?'ON':'OFF'));
+    if(settings.gyro) requestGyroPermission('設定');
+  });
+  swapSetBtn.addEventListener('click', function(){
+    settings.swap=!settings.swap;
+    saveSettings(); applySettingsToUI();
+    log('設定: 左右入替 = '+(settings.swap?'ON':'OFF'));
+  });
+  applySettingsToUI();
+
+  /* ---------- visible status (plain words; details stay in the log) ---------- */
   var loadStatusEl=document.getElementById('loadStatus');
   var loadBtn=document.getElementById('loadBtn');
   function setLoadStatus(text, cls){
@@ -245,53 +318,52 @@
     loadBtn.disabled=busy;
     loadBtn.textContent=busy?'読込中…':'読込';
   }
+  function hasVideo(){ return !!(video.getAttribute('src') || video.currentSrc); }
 
-  /* ---------- video events ---------- */
-  var simpleEvents=['loadstart','loadeddata','canplaythrough','pause','waiting','stalled','seeking','ended','emptied','suspend','abort'];
-  simpleEvents.forEach(function(name){
-    video.addEventListener(name, function(){ log('video event: '+name, 'ev'); });
-  });
-  video.addEventListener('loadedmetadata', function(){
-    log('video event: loadedmetadata  '+video.videoWidth+' x '+video.videoHeight+' / duration '+video.duration+'s', 'ev');
-    setLoadStatus('動画： 読み込み中… '+video.videoWidth+'×'+video.videoHeight+' / '+video.duration.toFixed(1)+'秒', 'busy');
-  });
-  video.addEventListener('canplay', function(){
-    log('video event: canplay', 'ev');
-    setLoadBusy(false);
-    if(wantAutoPlay){
-      wantAutoPlay=false;
-      tryPlay('自動再生');
-    } else if(video.paused){
-      setLoadStatus('動画： 準備OK '+video.videoWidth+'×'+video.videoHeight+' — 「▶ 再生」を押してください', 'ok');
-    }
-  });
-  video.addEventListener('playing', function(){
-    log('video event: playing', 'ev');
-    setLoadStatus('動画： 再生中 '+video.videoWidth+'×'+video.videoHeight, 'ok');
-  });
-  video.addEventListener('seeked', function(){
-    log('video event: seeked  currentTime='+video.currentTime.toFixed(2)+'s', 'ev');
-  });
-  video.addEventListener('error', function(){
-    var e=video.error, code=e?e.code:0;
-    log('video event: error  code='+code+' message='+((e&&e.message)||'(なし)'), 'ng');
-    setLoadBusy(false);
-    clearTimeout(loadWatchdog);
-    var msg;
-    if(code===2) msg='動画： 読み込み失敗（通信エラー）。電波の良い場所で、もう一度「読込」を押してください';
-    else if(code===3) msg='動画： 読み込み失敗（映像をデコードできませんでした）';
-    else if(code===4) msg='動画： 読み込み失敗（そのURLでは動画が取得できません。Dropboxの直接リンクか確認してください）';
-    else msg='動画： 読み込み失敗（エラーコード '+code+'）';
-    setLoadStatus(msg, 'ng');
-  });
-
-  var wantAutoPlay=false, loadWatchdog=null;
+  /* ---------- transport (play/pause + seek), shared by both screens ---------- */
+  var playBtn=document.getElementById('playBtn'), vrPlayBtn=document.getElementById('vrPlayBtn');
+  var seekEl=document.getElementById('seek'), vrSeekEl=document.getElementById('vrSeek');
+  var timeText=document.getElementById('timeText'), vrTimeText=document.getElementById('vrTime');
+  var seekingSeek=false, seekingVrSeek=false;
+  function fmtTime(s){
+    if(!isFinite(s) || s<0) s=0;
+    s=Math.floor(s);
+    return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+  }
+  function syncTransport(){
+    var label=video.paused?'▶':'⏸';
+    playBtn.textContent=label; vrPlayBtn.textContent=label;
+    var d=video.duration, t=video.currentTime;
+    var txt=fmtTime(t)+' / '+fmtTime(d);
+    timeText.textContent=txt; vrTimeText.textContent=txt;
+    var ratio=(isFinite(d)&&d>0)? Math.round(t/d*1000) : 0;
+    if(!seekingSeek) seekEl.value=String(ratio);
+    if(!seekingVrSeek) vrSeekEl.value=String(ratio);
+  }
+  function wireSeek(el, setFlag){
+    el.addEventListener('pointerdown', function(){ setFlag(true); });
+    el.addEventListener('pointerup', function(){ setFlag(false); });
+    el.addEventListener('input', function(){
+      var d=video.duration;
+      if(isFinite(d)&&d>0){
+        video.currentTime=d*(Number(el.value)/1000);
+        syncTransport();
+      }
+    });
+    el.addEventListener('change', function(){ setFlag(false); });
+  }
+  wireSeek(seekEl, function(v){ seekingSeek=v; });
+  wireSeek(vrSeekEl, function(v){ seekingVrSeek=v; });
+  video.addEventListener('timeupdate', syncTransport);
+  video.addEventListener('loadedmetadata', syncTransport);
+  video.addEventListener('play', syncTransport);
+  video.addEventListener('pause', syncTransport);
 
   function tryPlay(label){
     var p;
     try{ p=video.play(); }catch(err){
       log(label+' 失敗: '+(err.name||'')+' '+(err.message||err), 'ng');
-      setLoadStatus('動画： 準備OK — 「▶ 再生」を押してください', 'ok');
+      if(hasVideo()) setLoadStatus('準備ができました。「▶」を押すと再生します', 'ok');
       return;
     }
     if(p && typeof p.then==='function'){
@@ -299,10 +371,83 @@
        .catch(function(err){
          log(label+' 失敗: '+(err.name||'')+' '+(err.message||err), 'ng');
          if(!video.paused) return;
-         setLoadStatus('動画： 準備OK — 「▶ 再生」を押してください', 'ok');
+         if(hasVideo()) setLoadStatus('準備ができました。「▶」を押すと再生します', 'ok');
        });
     }
   }
+  function togglePlay(){
+    if(!hasVideo()){
+      setLoadStatus('まだ動画が読み込まれていません。下の「詳細・その他の操作」から動画リンクを貼ってください', 'ng');
+      openDetails(); urlInput.focus();
+      return;
+    }
+    if(settings.gyro && !gyroEnabled) requestGyroPermission('再生ボタン');
+    if(video.paused){
+      video.muted=false;
+      tryPlay('再生ボタン');
+    } else {
+      video.pause();
+      log('一時停止しました');
+    }
+  }
+  playBtn.addEventListener('click', togglePlay);
+  vrPlayBtn.addEventListener('click', function(){
+    togglePlay();
+    pokeVrUi();
+  });
+
+  /* ---------- video events ---------- */
+  var simpleEvents=['loadstart','loadeddata','canplaythrough','waiting','stalled','seeking','emptied','suspend','abort'];
+  simpleEvents.forEach(function(name){
+    video.addEventListener(name, function(){ log('video event: '+name, 'ev'); });
+  });
+  video.addEventListener('loadedmetadata', function(){
+    log('video event: loadedmetadata  '+video.videoWidth+' x '+video.videoHeight+' / duration '+video.duration+'s', 'ev');
+    setLoadStatus('読み込み中…', 'busy');
+  });
+  video.addEventListener('canplay', function(){
+    log('video event: canplay', 'ev');
+    loadingInProgress=false;
+    setLoadBusy(false);
+    if(wantAutoPlay){
+      wantAutoPlay=false;
+      tryPlay('自動再生');
+    } else if(video.paused){
+      setLoadStatus('準備ができました', 'ok');
+    }
+  });
+  video.addEventListener('playing', function(){
+    log('video event: playing', 'ev');
+    setLoadStatus('再生中', 'ok');
+    if(vrMode) requestWakeLock();
+  });
+  video.addEventListener('pause', function(){
+    log('video event: pause', 'ev');
+    if(loadingInProgress) return;
+    if(hasVideo() && !video.ended) setLoadStatus('一時停止中', '');
+  });
+  video.addEventListener('ended', function(){
+    log('video event: ended', 'ev');
+    setLoadStatus('再生が終わりました', '');
+  });
+  video.addEventListener('seeked', function(){
+    log('video event: seeked  currentTime='+video.currentTime.toFixed(2)+'s', 'ev');
+  });
+  video.addEventListener('error', function(){
+    var e=video.error, code=e?e.code:0;
+    log('video event: error  code='+code+' message='+((e&&e.message)||'(なし)'), 'ng');
+    loadingInProgress=false;
+    setLoadBusy(false);
+    clearTimeout(loadWatchdog);
+    var msg;
+    if(code===2) msg='読み込みに失敗しました（通信エラー）。電波の良い場所でもう一度お試しください';
+    else if(code===3) msg='読み込みに失敗しました（映像を再生できませんでした）';
+    else if(code===4) msg='読み込みに失敗しました（リンク先の動画が取得できませんでした）';
+    else msg='読み込みに失敗しました';
+    setLoadStatus(msg, 'ng');
+  });
+
+  var wantAutoPlay=false, loadWatchdog=null, loadingInProgress=false;
 
   // Accept messy pastes: pull the first URL out of surrounding text,
   // and rewrite Dropbox share-page links to the direct-download host.
@@ -319,7 +464,7 @@
     var cleaned=normalizeUrl(url);
     if(!cleaned){
       log('読込: URLが空、またはURLとして認識できませんでした', 'ng');
-      setLoadStatus('動画： URLが貼られていません。入力欄にURLを貼ってから「読込」を押してください', 'ng');
+      setLoadStatus('動画リンクが貼られていません', 'ng');
       urlInput.focus();
       return;
     }
@@ -328,16 +473,18 @@
       urlInput.value=cleaned;
     }
     url=cleaned;
-    texOkLogged=false; texNgLogged=false; stTex.textContent='未確認';
+    texOkLogged=false; texNgLogged=false;
     wantAutoPlay=true;
+    loadingInProgress=true;
     setLoadBusy(true);
-    setLoadStatus('動画： 読み込み中…', 'busy');
+    setLoadStatus('読み込み中…', 'busy');
     log('読込: '+url);
     clearTimeout(loadWatchdog);
     loadWatchdog=setTimeout(function(){
       if(video.readyState<2){
+        loadingInProgress=false;
         setLoadBusy(false);
-        setLoadStatus('動画： まだ読み込めていません（20秒経過）。通信が遅いか、URLが違う可能性があります', 'ng');
+        setLoadStatus('読み込みに時間がかかっています。通信が遅いか、リンクが違う可能性があります', 'ng');
         log('読込: 20秒経っても readyState='+video.readyState+' です', 'ng');
       }
     }, 20000);
@@ -347,162 +494,142 @@
       video.load();
     }catch(err){
       setLoadBusy(false);
-      setLoadStatus('動画： 読み込み失敗（'+(err.message||err)+'）', 'ng');
+      setLoadStatus('読み込みに失敗しました', 'ng');
       log('読込 失敗: '+(err.name||'')+' '+(err.message||err), 'ng');
     }
   }
   loadBtn.addEventListener('click', function(){ loadUrl(urlInput.value); });
   urlInput.addEventListener('keydown', function(e){ if(e.key==='Enter') loadUrl(urlInput.value); });
 
-  document.getElementById('playBtn').addEventListener('click', function(){
-    log('再生ボタン: video.play() を呼びます');
-    if(!video.getAttribute('src') && !video.currentSrc){
-      setLoadStatus('動画： まだ読み込んでいません。先にURLを貼って「読込」を押してください', 'ng');
-      urlInput.focus();
-      return;
-    }
-    wantAutoPlay=false;
-    tryPlay('video.play()');
+  /* ---------- wake lock (keep the screen on while watching in VR) ---------- */
+  var wakeLock=null;
+  function requestWakeLock(){
+    if(!('wakeLock' in navigator)) return;
+    if(wakeLock) return;
+    try{
+      navigator.wakeLock.request('screen').then(function(lock){
+        wakeLock=lock;
+        log('Wake Lock: 取得しました', 'ok');
+        lock.addEventListener('release', function(){ wakeLock=null; log('Wake Lock: 解放されました', 'ev'); });
+      }).catch(function(err){ log('Wake Lock: 取得できませんでした（ '+(err.message||err)+' ）', 'ev'); });
+    }catch(err){ log('Wake Lock: 例外（ '+(err.message||err)+' ）', 'ev'); }
+  }
+  function releaseWakeLock(){
+    if(wakeLock){ try{ wakeLock.release(); }catch(e){} wakeLock=null; }
+  }
+  document.addEventListener('visibilitychange', function(){
+    if(!document.hidden && vrMode && !video.paused) requestWakeLock();
   });
 
-  /* ---------- native video fullscreen (holder / goggle viewing) ---------- */
-  document.getElementById('fsBtn').addEventListener('click', function(){
-    log('動画全画面ボタン: ネイティブ全画面再生を起動します');
-    // iPhone Safari: play the raw SBS video full-screen in the native player.
-    if(typeof video.webkitEnterFullscreen==='function'){
-      try{
-        video.webkitEnterFullscreen();
-        log('video.webkitEnterFullscreen() を呼びました（生のSBS映像がそのまま表示されます）', 'ok');
-      }catch(err){
-        log('webkitEnterFullscreen 失敗: '+(err.name||'')+' '+(err.message||err), 'ng');
-      }
-      return;
-    }
-    // Fallback: fullscreen the stage container (canvas view).
-    var target=document.getElementById('stage');
-    var req=target.requestFullscreen||target.webkitRequestFullscreen;
-    if(typeof req==='function'){
-      try{
-        var r=req.call(target);
-        if(r && typeof r.catch==='function'){
-          r.catch(function(err){ log('requestFullscreen 失敗: '+(err.name||'')+' '+(err.message||err), 'ng'); });
-        }
-        log('コンテナの requestFullscreen を呼びました', 'ok');
-      }catch(err){
-        log('requestFullscreen 失敗: '+(err.name||'')+' '+(err.message||err), 'ng');
-      }
-    } else {
-      log('この環境では全画面APIが使えません', 'ng');
-    }
-  });
-  video.addEventListener('webkitbeginfullscreen', function(){ log('video event: webkitbeginfullscreen（ネイティブ全画面 開始）', 'ev'); });
-  video.addEventListener('webkitendfullscreen', function(){ log('video event: webkitendfullscreen（ネイティブ全画面 終了）', 'ev'); });
-
-  /* ---------- VR fullscreen (element fullscreen of the WebGL stage) ----------
-     iOS 26 Safari supports the standard Fullscreen API for elements.
-     Only the stage subtree is rendered while fullscreen, so the toolbar
-     and the other overlays disappear on their own; body.fs-on drives the
-     portrait rotate notice and the in-stage tap-to-show exit button. */
-  var stageEl=document.getElementById('stage');
-  var vrFsActive=false, vrFsPending=false, vrFsPrevUiOff=false, vrFsFailTimer=null;
-  var fsUi=document.getElementById('fsUi'), fsUiTimer=null;
-  function showFsUi(){
-    fsUi.classList.add('show');
-    clearTimeout(fsUiTimer);
-    fsUiTimer=setTimeout(hideFsUi, 3500);
+  /* ---------- VR mode ---------- */
+  var vrUi=document.getElementById('vrUi');
+  var vrUiTimer=null;
+  function showVrUi(){
+    vrUi.classList.add('show');
+    clearTimeout(vrUiTimer);
+    vrUiTimer=setTimeout(hideVrUi, 3000);
   }
-  function hideFsUi(){
-    fsUi.classList.remove('show');
-    clearTimeout(fsUiTimer);
+  function hideVrUi(){
+    vrUi.classList.remove('show');
+    clearTimeout(vrUiTimer);
   }
-  function toggleFsUi(){
-    if(fsUi.classList.contains('show')) hideFsUi(); else showFsUi();
+  function pokeVrUi(){
+    if(!vrMode) return;
+    if(vrUi.classList.contains('show')) showVrUi(); else showVrUi();
+  }
+  function toggleVrUi(){
+    if(vrUi.classList.contains('show')) hideVrUi(); else showVrUi();
   }
   function fsElementNow(){
     return document.fullscreenElement || document.webkitFullscreenElement || null;
   }
-  function vrFsFail(reason){
-    vrFsPending=false;
-    clearTimeout(vrFsFailTimer);
-    log('VR全画面: 失敗（'+reason+'）', 'ng');
-    setLoadStatus('VR全画面: 失敗（'+reason+'）', 'ng');
-  }
-  document.getElementById('vrFsBtn').addEventListener('click', function(){
-    log('VR全画面ボタン: ステージ要素への全画面を要求します');
-    if(fsElementNow()){
-      log('VR全画面: すでに全画面です');
-      return;
-    }
+  var isIPhone=/iPhone|iPod/i.test(navigator.userAgent||'');
+  var vrFsActive=false;
+  function tryVrFullscreen(){
+    if(isIPhone){ log('VR: iPhoneのため要素の全画面は試行しません（ホーム画面追加が全画面の経路です）'); return; }
     var req=stageEl.requestFullscreen || stageEl.webkitRequestFullscreen || stageEl.webkitRequestFullScreen;
-    if(typeof req!=='function'){
-      vrFsFail('このブラウザでは要素の全画面APIが使えません。「動画全画面(生)」をお試しください');
-      return;
-    }
-    vrFsPending=true;
-    clearTimeout(vrFsFailTimer);
-    vrFsFailTimer=setTimeout(function(){
-      if(vrFsPending && !vrFsActive) vrFsFail('全画面への移行が確認できませんでした');
-    }, 1500);
+    if(typeof req!=='function'){ log('VR: このブラウザでは全画面APIが使えません（VRモードは続行します）'); return; }
+    if(fsElementNow()) return;
     try{
       var r=req.call(stageEl);
       if(r && typeof r.catch==='function'){
-        r.catch(function(err){ vrFsFail((err.name?err.name+': ':'')+(err.message||'不明なエラー')); });
+        r.catch(function(err){ log('VR: 全画面化に失敗しました（VRモードは続行します）: '+(err.name||'')+' '+(err.message||err), 'ev'); });
       }
     }catch(err){
-      vrFsFail((err.name?err.name+': ':'')+(err.message||err));
+      log('VR: 全画面化に失敗しました（VRモードは続行します）: '+(err.message||err), 'ev');
     }
-  });
-  document.getElementById('fsExitBtn').addEventListener('click', function(){
-    log('VR全画面: 「全画面を終了」が押されました');
-    var ex=document.exitFullscreen || document.webkitExitFullscreen;
-    if(typeof ex==='function'){
-      try{ ex.call(document); }catch(err){ log('VR全画面: 終了 失敗 '+(err.message||err), 'ng'); }
+  }
+  function enterVr(){
+    if(!hasVideo()){
+      setLoadStatus('まだ動画が読み込まれていません。下の「詳細・その他の操作」から動画リンクを貼ってください', 'ng');
+      openDetails(); urlInput.focus();
+      return;
     }
-  });
+    if(settings.gyro && !gyroEnabled) requestGyroPermission('VRで見る');
+    video.muted=false;
+    vrMode=true;
+    document.body.classList.add('vr-on');
+    showVrUi();
+    tryVrFullscreen();
+    if(!video.paused) requestWakeLock();
+    if(video.paused) tryPlay('VR開始時');
+    log('VRモード: 開始（SBS表示）', 'ok');
+    setTimeout(resize, 60);
+  }
+  function exitVr(){
+    if(!vrMode) return;
+    vrMode=false;
+    document.body.classList.remove('vr-on');
+    hideVrUi();
+    releaseWakeLock();
+    if(fsElementNow()){
+      var ex=document.exitFullscreen || document.webkitExitFullscreen;
+      if(typeof ex==='function'){ try{ ex.call(document); }catch(err){ log('VR: 全画面終了 失敗 '+(err.message||err), 'ev'); } }
+    }
+    log('VRモード: 終了', 'ev');
+    setTimeout(resize, 60);
+  }
+  document.getElementById('vrBtn').addEventListener('click', enterVr);
+  document.getElementById('vrExitBtn').addEventListener('click', function(){ exitVr(); });
   function onFsChange(){
     var el=fsElementNow();
     log('fullscreenchange: '+(el?'全画面中':'全画面解除'), 'ev');
-    if(el===stageEl){
-      vrFsPending=false;
-      clearTimeout(vrFsFailTimer);
-      if(!vrFsActive){
-        vrFsActive=true;
-        vrFsPrevUiOff=document.body.classList.contains('ui-off');
-        document.body.classList.add('ui-off');
-        document.body.classList.add('fs-on');
-        showFsUi();
-        log('VR全画面: 成功（UIを隠してSBS全画面視聴中。画面タップで終了ボタンを表示）', 'ok');
-        setLoadStatus('VR全画面: 成功 — SBS全画面で視聴中です', 'ok');
-      }
-    } else if(!el && vrFsActive){
+    if(el===stageEl){ vrFsActive=true; }
+    else if(!el && vrFsActive){
       vrFsActive=false;
-      document.body.classList.remove('fs-on');
-      if(!vrFsPrevUiOff) document.body.classList.remove('ui-off');
-      hideFsUi();
-      log('VR全画面: 終了（UIを戻しました）', 'ev');
-      setLoadStatus('VR全画面: 終了しました', '');
+      if(vrMode){ log('VR: 全画面が解除されたためVRモードも終了します', 'ev'); exitVr(); }
     }
     setTimeout(resize, 60);
   }
   document.addEventListener('fullscreenchange', onFsChange);
   document.addEventListener('webkitfullscreenchange', onFsChange);
 
-  /* ---------- toggles ---------- */
-  var distortBtn=document.getElementById('distortBtn');
-  distortBtn.addEventListener('click', function(){
-    distortion=!distortion;
-    distortBtn.textContent='歪み補正 '+(distortion?'ON':'OFF');
-    distortBtn.setAttribute('aria-pressed', String(distortion));
-    log('歪み補正: '+(distortion?'ON':'OFF'));
-    updateStatus();
-  });
-  var swapBtn=document.getElementById('swapBtn');
-  swapBtn.addEventListener('click', function(){
-    swapEyes=!swapEyes;
-    swapBtn.setAttribute('aria-pressed', String(swapEyes));
-    log('左右入替: '+(swapEyes?'ON（L↔R）':'OFF（通常）'));
-    updateStatus();
-  });
+  /* ---------- recenter ----------
+     Takes the direction currently shown at the center as the new front,
+     by premultiplying an offset into the running recenter matrix.
+     - Gyro active: the full inverse of the current horizon-locked
+       attitude, so head tracking continues exactly from the new front
+       (the headset case; pitch included).
+     - Drag only: a yaw-only offset. A pitched offset would break the
+       verified horizon lock for later drags, while a yaw offset keeps
+       every future drag exactly level; pitch stays adjustable by drag. */
+  function recenter(){
+    var m=buildRotationMatrix();
+    var f=[-m[6], -m[7], -m[8]];
+    var W;
+    if(gyroActive){
+      var F=matFromForward(f);
+      W=new Float32Array([F[0],F[3],F[6], F[1],F[4],F[7], F[2],F[5],F[8]]); // transpose = inverse
+    } else {
+      var psi=Math.atan2(-f[0], -f[2]); // current forward yaw (drag convention)
+      var c=Math.cos(psi), s=Math.sin(psi);
+      W=new Float32Array([c,0,s, 0,1,0, -s,0,c]); // Ry(-psi), column-major
+    }
+    recenterMat=matMul3(W, recenterMat);
+    log('リセンター: 今見ている方向を正面にしました', 'ok');
+    pokeVrUi();
+  }
+  document.getElementById('recenterBtn').addEventListener('click', recenter);
 
   /* ---------- drag look-around ---------- */
   var dragging=false, lastX=0, lastY=0, downX=0, downY=0, downT=0;
@@ -510,28 +637,25 @@
     dragging=true; lastX=e.clientX; lastY=e.clientY;
     downX=e.clientX; downY=e.clientY; downT=Date.now();
     canvas.setPointerCapture(e.pointerId);
+    document.getElementById('dragHint').style.display='none';
   });
   canvas.addEventListener('pointermove', function(e){
     if(!dragging) return;
     var dx=e.clientX-lastX, dy=e.clientY-lastY;
     lastX=e.clientX; lastY=e.clientY;
-    // Inverted mapping (both axes): dragging right now looks toward the
-    // opposite side from before, and likewise for up/down.
+    // Inverted mapping (both axes), as verified on device.
     yaw   += dx*0.005;
     pitch += dy*0.005;
-    // wrap yaw to -PI..PI, clamp pitch
     while(yaw>Math.PI) yaw-=Math.PI*2;
     while(yaw<-Math.PI) yaw+=Math.PI*2;
     pitch=Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch));
-    updateStatus();
   });
   canvas.addEventListener('pointerup', function(e){
     dragging=false;
-    // In VR fullscreen, a tap (short, almost no movement) toggles the
-    // in-stage controls; drags still only look around.
-    if(vrFsActive && downT && (Date.now()-downT)<350){
+    // In VR mode, a tap (short, almost no movement) toggles the overlay.
+    if(vrMode && downT && (Date.now()-downT)<350){
       var tdx=e.clientX-downX, tdy=e.clientY-downY;
-      if(tdx*tdx+tdy*tdy<100) toggleFsUi();
+      if(tdx*tdx+tdy*tdy<100) toggleVrUi();
     }
     downT=0;
   });
@@ -541,9 +665,7 @@
      Same conversion as three.js DeviceOrientationControls:
      device Euler(beta, alpha, -gamma, 'YXZ') -> * q1 (-90deg about X, so the
      camera looks out the back of the device) -> * q0 (screen orientation).
-     The old alpha/beta->yaw/pitch extraction broke in landscape because the
-     device axes no longer line up with the screen axes; the quaternion path
-     is correct in portrait and landscape alike. */
+     Verified on device in portrait and landscape. */
   function qAxisAngle(ax, ay, az, angle){
     var s=Math.sin(angle/2);
     return [ax*s, ay*s, az*s, Math.cos(angle/2)];
@@ -584,15 +706,11 @@
   }
 
   /* ---------- horizon lock: rebuild the basis from the forward vector ----------
-     The drag rotation is NOT composed as a quaternion chain. Every frame
-     it is rebuilt from the view forward vector f:
-       right r = normalize(cross(f, world up (0,1,0)))
-       up    u = cross(r, f)
-     and the matrix columns are (r, u, -f). The right vector is horizontal
-     by construction, so the horizon stays exactly level (roll strictly
-     zero) at any pitch — verified numerically over yaw -170..170 deg x
-     pitch -60..+60 deg (tilt 0.000 deg everywhere, basis orthonormal to
-     machine precision). */
+     The drag rotation is rebuilt from the view forward vector f every
+     frame: right r = normalize(cross(f, world up)), up u = cross(r, f),
+     matrix columns (r, u, -f). The right vector is horizontal by
+     construction, so the horizon stays exactly level at any pitch —
+     verified numerically and on device. Do not change. */
   function cross3(a, b){
     return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
   }
@@ -601,9 +719,6 @@
     var r=[-f[2], 0, f[0]];
     var l=Math.sqrt(r[0]*r[0]+r[2]*r[2]);
     if(l<1e-6){
-      // Looking straight up or down: the horizontal right axis is
-      // undefined; fall back to the drag yaw's right axis so the frame
-      // stays stable instead of spinning.
       r=[Math.cos(yaw), 0, -Math.sin(yaw)];
     } else {
       r=[r[0]/l, 0, r[2]/l];
@@ -628,15 +743,14 @@
     // Drag-only rotation, rebuilt from the drag forward vector:
     // f = Ry(yaw) * Rx(pitch) applied to the straight-ahead (0,0,-1).
     var cy=Math.cos(yaw), sy=Math.sin(yaw), cp=Math.cos(pitch), sp=Math.sin(pitch);
-    var dragMat=matFromForward([-sy*cp, sp, -cy*cp]);
-    if(!gyroActive) return dragMat;
-    // Gyro ON: the gyro attitude itself is used untouched (with no drag
-    // the drag matrix is the identity, so the gyro matrix passes through
-    // exactly). The drag offset — itself horizon-locked, i.e. a yaw about
-    // the world up axis followed by a pitch about the horizontal right
-    // axis — is applied in the world frame on top of it, so dragging
-    // never adds tilt of its own on top of the gyro attitude.
-    return matMul3(dragMat, qToMat3ColumnMajor(gyroQuaternion()));
+    var m=matFromForward([-sy*cp, sp, -cy*cp]);
+    if(gyroActive){
+      // Gyro attitude is used untouched; the horizon-locked drag offset
+      // is applied in the world frame on top of it.
+      m=matMul3(m, qToMat3ColumnMajor(gyroQuaternion()));
+    }
+    // Recenter offset (identity until the user recenters).
+    return matMul3(recenterMat, m);
   }
 
   /* ---------- gyro ---------- */
@@ -648,14 +762,13 @@
     if(e.gamma!==null) devGamma=e.gamma;
     gyroActive=true;
     if(!gyroLogged){ gyroLogged=true; log('deviceorientation 受信開始: alpha='+e.alpha+' beta='+e.beta+' gamma='+e.gamma+' / 画面向き='+screenAngleDeg()+'°（四元数方式）', 'ok'); }
-    updateStatus();
   }
   function enableGyro(){
     window.addEventListener('deviceorientation', onOrientation);
     if(!gyroEnabled){ gyroEnabled=true; log('ジャイロ: deviceorientation を有効化しました', 'ok'); }
   }
-  document.getElementById('gyroBtn').addEventListener('click', function(){
-    log('ジャイロ許可ボタン: 押されました');
+  function requestGyroPermission(from){
+    log('ジャイロ: 有効化を試みます（きっかけ: '+from+'）');
     if(typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function'){
       DeviceOrientationEvent.requestPermission().then(function(res){
         log('DeviceOrientationEvent.requestPermission() = '+res, res==='granted'?'ok':'ng');
@@ -664,15 +777,19 @@
         log('ジャイロ許可 失敗: '+(err.name||'')+' '+(err.message||err), 'ng');
       });
     } else {
-      log('requestPermission は無い環境です（そのまま有効化します）');
       enableGyro();
     }
-  });
+  }
+  if(settings.gyro && !(typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function')){
+    enableGyro();
+    log('ジャイロ: 設定ONのため最初から有効化しました');
+  }
 
   /* ---------- WebGL ---------- */
   var gl = canvas.getContext('webgl', {antialias:false, alpha:false}) || canvas.getContext('experimental-webgl');
   if(!gl){
     log('WebGL NG: コンテキストを取得できませんでした', 'ng');
+    setLoadStatus('このブラウザでは映像を表示できません', 'ng');
     return;
   }
   log('WebGL OK', 'ok');
@@ -689,18 +806,20 @@
     'uniform sampler2D u_tex;',
     'uniform mat3 u_rot;',
     'uniform float u_eye;',      // 0 = left half, 1 = right half
-    'uniform float u_aspect;',   // per-eye viewport aspect (w/h)
-    'uniform float u_distort;',  // 0 / 1
+    'uniform float u_aspect;',   // viewport aspect (w/h)
+    'uniform float u_distort;',  // 0 = off, 1 = recommended (verified weak), 2 = strong
+    'uniform float u_ipd;',      // per-eye horizontal shift (texture units)
     'const float PI = 3.141592653589793;',
     'void main(){',
     '  vec2 p = v_pos;',
     '  if(u_distort > 0.5){',
     // Gentle pincushion correction only: the full frame stays visible (no
-    // circular cut-out, no shrink). A slight overall magnification of the
-    // image (sample scale < 1) keeps the corners filled, and the
-    // coefficients are deliberately weak.
+    // circular cut-out, no shrink). Level 1 keeps the device-verified
+    // coefficients; level 2 is a stronger variant of the same shape.
     '    float r2 = dot(p,p);',
-    '    float f = 0.96 * (1.0 + 0.10*r2 + 0.02*r2*r2);',
+    '    float f;',
+    '    if(u_distort > 1.5){ f = 0.93 * (1.0 + 0.16*r2 + 0.04*r2*r2); }',
+    '    else { f = 0.96 * (1.0 + 0.10*r2 + 0.02*r2*r2); }',
     '    p = p * f;',
     '  }',
     // 90 deg vertical FOV -> tan(45deg) = 1.0 ; forward = -Z
@@ -709,7 +828,7 @@
     '  if(dir.z > 0.0){ gl_FragColor = vec4(0.0,0.0,0.0,1.0); return; }',
     '  float yawAngle = atan(dir.x, -dir.z);',
     '  float pitchAngle = asin(clamp(dir.y, -1.0, 1.0));',
-    '  float u = (u_eye + yawAngle/PI + 0.5) * 0.5;',
+    '  float u = (u_eye + yawAngle/PI + 0.5) * 0.5 + u_ipd * (u_eye < 0.5 ? 1.0 : -1.0);',
     '  float v = 0.5 - pitchAngle/PI;',
     '  gl_FragColor = texture2D(u_tex, vec2(u, v));',
     '}'
@@ -741,7 +860,8 @@
   var uRot=gl.getUniformLocation(prog,'u_rot'),
       uEye=gl.getUniformLocation(prog,'u_eye'),
       uAspect=gl.getUniformLocation(prog,'u_aspect'),
-      uDistort=gl.getUniformLocation(prog,'u_distort');
+      uDistort=gl.getUniformLocation(prog,'u_distort'),
+      uIpd=gl.getUniformLocation(prog,'u_ipd');
   gl.uniform1i(gl.getUniformLocation(prog,'u_tex'), 0);
 
   var tex=gl.createTexture();
@@ -754,8 +874,7 @@
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0,0,0,255]));
 
   function resize(){
-    var stage=document.getElementById('stage');
-    var w=stage.clientWidth, h=stage.clientHeight;
+    var w=stageEl.clientWidth, h=stageEl.clientHeight;
     var dpr=Math.min(window.devicePixelRatio||1, 2);
     var cw=Math.max(2, Math.round(w*dpr)), ch=Math.max(2, Math.round(h*dpr));
     if(canvas.width!==cw || canvas.height!==ch){ canvas.width=cw; canvas.height=ch; }
@@ -767,19 +886,19 @@
   function frame(){
     requestAnimationFrame(frame);
     resize();
-    var W=canvas.width, H=canvas.height, halfW=Math.floor(W/2);
+    var W=canvas.width, H=canvas.height;
 
     if(video.readyState >= 2){
       try{
         gl.bindTexture(gl.TEXTURE_2D, tex);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
         if(!texOkLogged){
-          texOkLogged=true; stTex.textContent='成功';
+          texOkLogged=true;
           log('texImage2D 成功 = CORS通過 ('+video.videoWidth+' x '+video.videoHeight+')', 'ok');
         }
       }catch(err){
         if(!texNgLogged){
-          texNgLogged=true; stTex.textContent='失敗';
+          texNgLogged=true;
           log('texImage2D 失敗 (CORS): '+(err.name||'Error')+' '+(err.message||err), 'ng');
         }
       }
@@ -787,52 +906,68 @@
 
     gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);
     gl.uniformMatrix3fv(uRot, false, buildRotationMatrix());
-    gl.uniform1f(uDistort, distortion?1:0);
-    gl.uniform1f(uAspect, (halfW/Math.max(1,H)));
+    gl.uniform1f(uDistort, settings.dist);
 
+    if(!vrMode){
+      // Start screen: single-eye preview over the full stage (no SBS).
+      gl.viewport(0, 0, W, H);
+      gl.uniform1f(uEye, settings.swap?1:0);
+      gl.uniform1f(uAspect, W/Math.max(1,H));
+      gl.uniform1f(uIpd, 0);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      return;
+    }
+
+    // VR mode: side-by-side stereo with the IPD offset.
+    var halfW=Math.floor(W/2);
+    var ipd=settings.ipd/1000; // slider -30..30 -> -0.030..0.030 texture units
+    gl.uniform1f(uIpd, ipd);
     // left viewport
     gl.viewport(0, 0, halfW, H);
-    gl.uniform1f(uEye, swapEyes?1:0);
+    gl.uniform1f(uEye, settings.swap?1:0);
+    gl.uniform1f(uAspect, (halfW/Math.max(1,H)));
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     // right viewport
     gl.viewport(halfW, 0, W-halfW, H);
-    gl.uniform1f(uEye, swapEyes?0:1);
+    gl.uniform1f(uEye, settings.swap?0:1);
     gl.uniform1f(uAspect, ((W-halfW)/Math.max(1,H)));
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
   requestAnimationFrame(frame);
-  updateStatus();
+  syncTransport();
 
   /* ---------- standalone (added to Home Screen) detection ----------
      On iPhone the element Fullscreen API is unavailable in Safari, so the
      intended fullscreen route is launching standalone from the Home
-     Screen. Show the small how-to hint only while running in a browser
-     tab; never when already standalone, and let the user dismiss it. */
-  var saHint=document.getElementById('saHint');
+     Screen. The how-to note lives in the details panel and is hidden
+     when already standalone. */
   var isStandalone=(window.navigator.standalone===true) ||
     (typeof window.matchMedia==='function' && window.matchMedia('(display-mode: standalone)').matches);
   if(isStandalone){
+    document.getElementById('saHint').hidden=true;
     log('standalone表示で起動しています（ホーム画面から起動）', 'ok');
   } else {
-    saHint.classList.add('show');
     log('ブラウザ表示です。全画面で見るには 共有ボタン →「ホーム画面に追加」から起動してください');
   }
-  document.getElementById('saHintClose').addEventListener('click', function(){
-    saHint.classList.remove('show');
-    log('「ホーム画面に追加」の案内を閉じました');
-  });
 
-  /* ---------- initial URL from ?u= ---------- */
+  /* ---------- initial parameters: ?t= title, ?u= video ---------- */
   var params=new URLSearchParams(location.search);
+  var t=params.get('t');
+  var title=(t && t.trim()) ? t.trim() : 'VR180 Viewer';
+  document.getElementById('titleText').textContent=title;
+  document.getElementById('vrTitle').textContent=title;
+  document.title=title;
+
   var u=params.get('u');
   if(u){
     urlInput.value=u;
     log('?u= パラメータからURLを取得しました');
     loadUrl(u);
   } else {
+    setLoadStatus('動画リンクが指定されていません。下の「詳細・その他の操作」から貼ってください', '');
     log('?u= パラメータなし。URLを貼って「読込」を押してください');
   }
-  log('初期化完了: ドラッグで見回し / 再生ボタンで video.play() を実行します');
+  log('初期化完了: スタート画面（片目プレビュー）/「VRで見る」でVRモードへ');
 })();
 </script>
 </body>
