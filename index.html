@@ -29,6 +29,15 @@
   .eye-label{position:absolute;top:8px;font-family:var(--mono);font-size:11px;color:rgba(255,255,255,.65);background:rgba(0,0,0,.45);padding:2px 7px;border-radius:20px;pointer-events:none}
   .eye-label.l{left:10px}.eye-label.r{right:10px}
   .hint{position:absolute;left:50%;bottom:calc(34px + env(safe-area-inset-bottom));transform:translateX(-50%);font-size:12px;color:rgba(255,255,255,.75);background:rgba(0,0,0,.55);padding:5px 10px;border-radius:20px;pointer-events:none;white-space:nowrap}
+  /* ---------- VR fullscreen in-stage overlays ---------- */
+  .rotate-hint{position:absolute;inset:0;z-index:3;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.6);pointer-events:none;text-align:center}
+  .rotate-hint span{font-size:15px;font-weight:700;line-height:1.7;color:#fff;background:rgba(0,0,0,.45);padding:12px 18px;border-radius:10px}
+  @media (orientation:portrait){
+    body.fs-on .rotate-hint{display:flex}
+  }
+  .fs-ui{position:absolute;left:50%;top:calc(14px + env(safe-area-inset-top));transform:translateX(-50%);z-index:4;display:none}
+  body.fs-on .fs-ui.show{display:block}
+  .fs-ui .btn{background:rgba(10,13,19,.72);border-color:rgba(255,255,255,.4);color:#fff;padding:9px 16px;font-size:13px}
   video{position:absolute;width:2px;height:2px;opacity:0;pointer-events:none;left:0;top:0}
 
   /* ---------- overlay toolbar (single row, horizontally scrollable) ---------- */
@@ -94,6 +103,10 @@
   <span class="eye-label l" id="labelL">L</span>
   <span class="eye-label r" id="labelR">R</span>
   <div class="hint">ドラッグで見回し</div>
+  <div class="rotate-hint" id="rotateHint"><span>横画面にしてください<br>スマホを横向きにすると全画面で見られます</span></div>
+  <div class="fs-ui" id="fsUi">
+    <button class="btn" id="fsExitBtn" type="button">全画面を終了</button>
+  </div>
   <video id="video" crossorigin="anonymous" playsinline loop preload="auto" muted></video>
 </div>
 
@@ -103,7 +116,8 @@
     <button class="btn" id="loadBtn" type="button">読込</button>
   </div>
   <button class="btn primary" id="playBtn" type="button">▶ 再生</button>
-  <button class="btn primary" id="fsBtn" type="button">動画全画面</button>
+  <button class="btn primary" id="vrFsBtn" type="button">VR全画面</button>
+  <button class="btn primary" id="fsBtn" type="button">動画全画面(生)</button>
   <button class="btn" id="gyroBtn" type="button">ジャイロ許可</button>
   <button class="btn" id="distortBtn" type="button" aria-pressed="false">歪み補正 OFF</button>
   <button class="btn" id="swapBtn" type="button" aria-pressed="false">左右入替</button>
@@ -367,9 +381,95 @@
   });
   video.addEventListener('webkitbeginfullscreen', function(){ log('video event: webkitbeginfullscreen（ネイティブ全画面 開始）', 'ev'); });
   video.addEventListener('webkitendfullscreen', function(){ log('video event: webkitendfullscreen（ネイティブ全画面 終了）', 'ev'); });
-  document.addEventListener('fullscreenchange', function(){
-    log('fullscreenchange: '+(document.fullscreenElement?'全画面中':'全画面解除'), 'ev');
+
+  /* ---------- VR fullscreen (element fullscreen of the WebGL stage) ----------
+     iOS 26 Safari supports the standard Fullscreen API for elements.
+     Only the stage subtree is rendered while fullscreen, so the toolbar
+     and the other overlays disappear on their own; body.fs-on drives the
+     portrait rotate notice and the in-stage tap-to-show exit button. */
+  var stageEl=document.getElementById('stage');
+  var vrFsActive=false, vrFsPending=false, vrFsPrevUiOff=false, vrFsFailTimer=null;
+  var fsUi=document.getElementById('fsUi'), fsUiTimer=null;
+  function showFsUi(){
+    fsUi.classList.add('show');
+    clearTimeout(fsUiTimer);
+    fsUiTimer=setTimeout(hideFsUi, 3500);
+  }
+  function hideFsUi(){
+    fsUi.classList.remove('show');
+    clearTimeout(fsUiTimer);
+  }
+  function toggleFsUi(){
+    if(fsUi.classList.contains('show')) hideFsUi(); else showFsUi();
+  }
+  function fsElementNow(){
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+  }
+  function vrFsFail(reason){
+    vrFsPending=false;
+    clearTimeout(vrFsFailTimer);
+    log('VR全画面: 失敗（'+reason+'）', 'ng');
+    setLoadStatus('VR全画面: 失敗（'+reason+'）', 'ng');
+  }
+  document.getElementById('vrFsBtn').addEventListener('click', function(){
+    log('VR全画面ボタン: ステージ要素への全画面を要求します');
+    if(fsElementNow()){
+      log('VR全画面: すでに全画面です');
+      return;
+    }
+    var req=stageEl.requestFullscreen || stageEl.webkitRequestFullscreen || stageEl.webkitRequestFullScreen;
+    if(typeof req!=='function'){
+      vrFsFail('このブラウザでは要素の全画面APIが使えません。「動画全画面(生)」をお試しください');
+      return;
+    }
+    vrFsPending=true;
+    clearTimeout(vrFsFailTimer);
+    vrFsFailTimer=setTimeout(function(){
+      if(vrFsPending && !vrFsActive) vrFsFail('全画面への移行が確認できませんでした');
+    }, 1500);
+    try{
+      var r=req.call(stageEl);
+      if(r && typeof r.catch==='function'){
+        r.catch(function(err){ vrFsFail((err.name?err.name+': ':'')+(err.message||'不明なエラー')); });
+      }
+    }catch(err){
+      vrFsFail((err.name?err.name+': ':'')+(err.message||err));
+    }
   });
+  document.getElementById('fsExitBtn').addEventListener('click', function(){
+    log('VR全画面: 「全画面を終了」が押されました');
+    var ex=document.exitFullscreen || document.webkitExitFullscreen;
+    if(typeof ex==='function'){
+      try{ ex.call(document); }catch(err){ log('VR全画面: 終了 失敗 '+(err.message||err), 'ng'); }
+    }
+  });
+  function onFsChange(){
+    var el=fsElementNow();
+    log('fullscreenchange: '+(el?'全画面中':'全画面解除'), 'ev');
+    if(el===stageEl){
+      vrFsPending=false;
+      clearTimeout(vrFsFailTimer);
+      if(!vrFsActive){
+        vrFsActive=true;
+        vrFsPrevUiOff=document.body.classList.contains('ui-off');
+        document.body.classList.add('ui-off');
+        document.body.classList.add('fs-on');
+        showFsUi();
+        log('VR全画面: 成功（UIを隠してSBS全画面視聴中。画面タップで終了ボタンを表示）', 'ok');
+        setLoadStatus('VR全画面: 成功 — SBS全画面で視聴中です', 'ok');
+      }
+    } else if(!el && vrFsActive){
+      vrFsActive=false;
+      document.body.classList.remove('fs-on');
+      if(!vrFsPrevUiOff) document.body.classList.remove('ui-off');
+      hideFsUi();
+      log('VR全画面: 終了（UIを戻しました）', 'ev');
+      setLoadStatus('VR全画面: 終了しました', '');
+    }
+    setTimeout(resize, 60);
+  }
+  document.addEventListener('fullscreenchange', onFsChange);
+  document.addEventListener('webkitfullscreenchange', onFsChange);
 
   /* ---------- toggles ---------- */
   var distortBtn=document.getElementById('distortBtn');
@@ -389,9 +489,10 @@
   });
 
   /* ---------- drag look-around ---------- */
-  var dragging=false, lastX=0, lastY=0;
+  var dragging=false, lastX=0, lastY=0, downX=0, downY=0, downT=0;
   canvas.addEventListener('pointerdown', function(e){
     dragging=true; lastX=e.clientX; lastY=e.clientY;
+    downX=e.clientX; downY=e.clientY; downT=Date.now();
     canvas.setPointerCapture(e.pointerId);
   });
   canvas.addEventListener('pointermove', function(e){
@@ -406,9 +507,17 @@
     pitch=Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch));
     updateStatus();
   });
-  ['pointerup','pointercancel'].forEach(function(n){
-    canvas.addEventListener(n, function(){ dragging=false; });
+  canvas.addEventListener('pointerup', function(e){
+    dragging=false;
+    // In VR fullscreen, a tap (short, almost no movement) toggles the
+    // in-stage controls; drags still only look around.
+    if(vrFsActive && downT && (Date.now()-downT)<350){
+      var tdx=e.clientX-downX, tdy=e.clientY-downY;
+      if(tdx*tdx+tdy*tdy<100) toggleFsUi();
+    }
+    downT=0;
   });
+  canvas.addEventListener('pointercancel', function(){ dragging=false; downT=0; });
 
   /* ---------- orientation math (quaternions) ----------
      Same conversion as three.js DeviceOrientationControls:
