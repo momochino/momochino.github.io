@@ -1,0 +1,14 @@
+{
+ "works": [
+  {
+   "id": "test-3840",
+   "title": "テスト作品（動作確認用）",
+   "date": "2026-11-03",
+   "enc": {
+    "salt": "YG0TSJpDhrtWgyXXga9Iew==",
+    "iv": "hGT3Cg07s21kv4Wx",
+    "data": "P+SNitrrb5xdLORiv6B38CjdaaahJQ1H0IlND5moPqKXvfxZpR44d78T+w2PP4BcYVqHN/JkkS2fVP6yyB4Q4YxQ05+0yASLdbSHoNCt8K2+nKb15QzfJcJvNyVva8JfaEvQiKiDhpeZ6JkRxCeEyjbCcsHcVEwa3EIezypHytInpjjt"
+   }
+  }
+ ]
+}
